@@ -1,0 +1,93 @@
+{
+  "node": {
+    "version": {
+      "20.20.2": {
+        "linux-x64": "https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-x64.tar.xz",
+        "linux-arm64": "https://nodejs.org/dist/v20.20.2/node-v20.20.2-linux-arm64.tar.xz",
+        "windows-x64": "https://nodejs.org/dist/v20.20.2/node-v20.20.2-win-x64.zip",
+        "windows-arm64": "https://nodejs.org/dist/v20.20.2/node-v20.20.2-win-arm64.zip"
+      },
+      "22.22.2": {
+        "linux-x64": "https://nodejs.org/dist/v22.22.2/node-v22.22.2-linux-x64.tar.xz",
+        "linux-arm64": "https://nodejs.org/dist/v22.22.2/node-v22.22.2-linux-arm64.tar.xz",
+        "windows-x64": "https://nodejs.org/dist/v22.22.2/node-v22.22.2-win-x64.zip",
+        "windows-arm64": "https://nodejs.org/dist/v22.22.2/node-v22.22.2-win-arm64.zip"
+      },
+      "24.14.1": {
+        "linux-x64": "https://nodejs.org/dist/v24.14.1/node-v24.14.1-linux-x64.tar.xz",
+        "linux-arm64": "https://nodejs.org/dist/v24.14.1/node-v24.14.1-linux-arm64.tar.xz",
+        "windows-x64": "https://nodejs.org/dist/v24.14.1/node-v24.14.1-win-x64.zip",
+        "windows-arm64": "https://nodejs.org/dist/v24.14.1/node-v24.14.1-win-arm64.zip"
+      }
+    }
+  },
+  "maven": {
+    "version": {
+      "3.6.3": {
+        "linux-any": "https://archive.apache.org/dist/maven/maven-3/3.6.3/binaries/apache-maven-3.6.3-bin.tar.gz",
+        "windows-any": "https://archive.apache.org/dist/maven/maven-3/3.6.3/binaries/apache-maven-3.6.3-bin.zip"
+      },
+      "3.8.8": {
+        "linux-any": "https://archive.apache.org/dist/maven/maven-3/3.8.8/binaries/apache-maven-3.8.8-bin.tar.gz",
+        "windows-any": "https://archive.apache.org/dist/maven/maven-3/3.8.8/binaries/apache-maven-3.8.8-bin.zip"
+      },
+      "3.9.9": {
+        "linux-any": "https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz",
+        "windows-any": "https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.zip"
+      }
+    }
+  },
+  "java": {
+    "version": {
+      "graalvm-8": {
+        "linux-x64": "https://github.com/graalvm/graalvm-ce-builds/releases/download/vm-21.3.3/graalvm-ce-java8-linux-amd64-21.3.3.tar.gz",
+        "windows-x64": "https://github.com/graalvm/graalvm-ce-builds/releases/download/vm-21.3.3/graalvm-ce-java8-windows-amd64-21.3.3.zip"
+      },
+      "graalvm-17": {
+        "linux-x64": "https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-17.0.9/graalvm-community-jdk-17.0.9_linux-x64_bin.tar.gz",
+        "windows-x64": "https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-17.0.9/graalvm-community-jdk-17.0.9_windows-x64_bin.zip"
+      },
+      "graalvm-21": {
+        "linux-x64": "https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-21.0.2/graalvm-community-jdk-21.0.2_linux-x64_bin.tar.gz",
+        "windows-x64": "https://github.com/graalvm/graalvm-ce-builds/releases/download/jdk-21.0.2/graalvm-community-jdk-21.0.2_windows-x64_bin.zip"
+      },
+      "openjdk-8": {
+        "linux-x64": "https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u442-b06/OpenJDK8U-jdk_x64_linux_hotspot_8u442b06.tar.gz",
+        "linux-arm64": "https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u442-b06/OpenJDK8U-jdk_aarch64_linux_hotspot_8u442b06.tar.gz",
+        "windows-x64": "https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u442-b06/OpenJDK8U-jdk_x64_windows_hotspot_8u442b06.zip"
+      },
+      "openjdk-17": {
+        "linux-x64": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.14%2B7/OpenJDK17U-jdk_x64_linux_hotspot_17.0.14_7.tar.gz",
+        "linux-arm64": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.14%2B7/OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.14_7.tar.gz",
+        "windows-x64": "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.14%2B7/OpenJDK17U-jdk_x64_windows_hotspot_17.0.14_7.zip"
+      },
+      "openjdk-21": {
+        "linux-x64": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.6%2B7/OpenJDK21U-jdk_x64_linux_hotspot_21.0.6_7.tar.gz",
+        "linux-arm64": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.6%2B7/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.6_7.tar.gz",
+        "windows-x64": "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.6%2B7/OpenJDK21U-jdk_x64_windows_hotspot_21.0.6_7.zip"
+      }
+    }
+  },
+  "python": {
+    "version": {
+      "3.10.15": {
+        "linux-x64": "https://github.com/astral-sh/python-build-standalone/releases/download/20241016/cpython-3.10.15%2B20241016-x86_64-unknown-linux-gnu-install_only.tar.gz",
+        "linux-arm64": "https://github.com/astral-sh/python-build-standalone/releases/download/20241016/cpython-3.10.15%2B20241016-aarch64-unknown-linux-gnu-install_only.tar.gz",
+        "windows-x64": "https://www.python.org/ftp/python/3.10.15/python-3.10.15-embed-amd64.zip",
+        "windows-arm64": "https://www.python.org/ftp/python/3.10.15/python-3.10.15-embed-arm64.zip"
+      },
+      "3.11.10": {
+        "linux-x64": "https://github.com/astral-sh/python-build-standalone/releases/download/20241016/cpython-3.11.10%2B20241016-x86_64-unknown-linux-gnu-install_only.tar.gz",
+        "linux-arm64": "https://github.com/astral-sh/python-build-standalone/releases/download/20241016/cpython-3.11.10%2B20241016-aarch64-unknown-linux-gnu-install_only.tar.gz",
+        "windows-x64": "https://www.python.org/ftp/python/3.11.10/python-3.11.10-embed-amd64.zip",
+        "windows-arm64": "https://www.python.org/ftp/python/3.11.10/python-3.11.10-embed-arm64.zip"
+      },
+      "3.12.7": {
+        "linux-x64": "https://github.com/astral-sh/python-build-standalone/releases/download/20241016/cpython-3.12.7%2B20241016-x86_64-unknown-linux-gnu-install_only.tar.gz",
+        "linux-arm64": "https://github.com/astral-sh/python-build-standalone/releases/download/20241016/cpython-3.12.7%2B20241016-aarch64-unknown-linux-gnu-install_only.tar.gz",
+        "windows-x64": "https://www.python.org/ftp/python/3.12.7/python-3.12.7-embed-amd64.zip",
+        "windows-arm64": "https://www.python.org/ftp/python/3.12.7/python-3.12.7-embed-arm64.zip"
+      }
+    }
+  }
+}
