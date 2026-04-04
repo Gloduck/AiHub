@@ -309,7 +309,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --verbose)
-      export AIHUB_VERBOSE=1
+      export SCRIPT_VERBOSE=1
       shift
       ;;
     -h|--help)

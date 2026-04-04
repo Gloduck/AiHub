@@ -40,7 +40,7 @@ log() {
 }
 
 debug() {
-  if [[ "${AIHUB_VERBOSE:-0}" = "1" ]]; then
+  if [[ "${SCRIPT_VERBOSE:-0}" = "1" ]]; then
     log "DEBUG" "$@"
   fi
 }
