@@ -20,8 +20,22 @@ from _lib.common import debug, error, from_cwd, info, setup_logging
 
 
 DESCRIPTION = "Execute remote Linux bash commands over SSH and stream output in real time."
+HOST_ENV = "REMOTE_SSH_HOST"
+PORT_ENV = "REMOTE_SSH_PORT"
+USER_ENV = "REMOTE_SSH_USER"
+PASSWORD_ENV = "REMOTE_SSH_PASSWORD"
+
+
+def get_port_default() -> int:
+    raw_port = os.environ.get(PORT_ENV, "22")
+    try:
+        return int(raw_port)
+    except ValueError as exc:
+        raise SystemExit(f"[ERROR] invalid {PORT_ENV}: {raw_port}") from exc
+
+
 EPILOG = """Required inputs:
-  --host, --user, --password, and at least one --command or --command-file
+  --host, --user, and at least one --command or --command-file
 
 Behavior:
   Commands from repeated --command flags are appended in order.
@@ -30,10 +44,17 @@ Behavior:
   Remote stdout/stderr is streamed directly to the local console in real time.
   Use --tty for interactive commands such as top.
   This script runs remote Linux bash commands over SSH. It does not execute local Windows cmd or PowerShell commands.
+  If --password and REMOTE_SSH_PASSWORD are both omitted, ssh key or ssh-agent authentication is used.
 
 Requirements:
   Requires local Python and local ssh client.
   No interactive prompts are used.
+
+Environment variables:
+  REMOTE_SSH_HOST
+  REMOTE_SSH_PORT
+  REMOTE_SSH_USER
+  REMOTE_SSH_PASSWORD
 """
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -41,10 +62,29 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=EPILOG,
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("--host", required=True, help="Target Linux server address.")
-    parser.add_argument("--port", type=int, default=22, help="SSH port. Default: 22.")
-    parser.add_argument("--user", required=True, help="SSH username.")
-    parser.add_argument("--password", required=True, help="SSH password.")
+    parser.add_argument(
+        "--host",
+        required=HOST_ENV not in os.environ,
+        default=os.environ.get(HOST_ENV),
+        help=f"Target Linux server address. Fallback env: {HOST_ENV}.",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=get_port_default(),
+        help=f"SSH port. Default: 22. Fallback env: {PORT_ENV}.",
+    )
+    parser.add_argument(
+        "--user",
+        required=USER_ENV not in os.environ,
+        default=os.environ.get(USER_ENV),
+        help=f"SSH username. Fallback env: {USER_ENV}.",
+    )
+    parser.add_argument(
+        "--password",
+        default=os.environ.get(PASSWORD_ENV),
+        help=f"SSH password. Optional when using ssh key auth. Fallback env: {PASSWORD_ENV}.",
+    )
     parser.add_argument(
         "--command",
         action="append",
@@ -76,7 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def print_password() -> int:
-    sys.stdout.write(os.environ.get("REMOTE_EXEC_SSH_PASSWORD", ""))
+    sys.stdout.write(os.environ.get(PASSWORD_ENV, ""))
     sys.stdout.write("\n")
     sys.stdout.flush()
     return 0
@@ -152,17 +192,26 @@ def build_ssh_command(args: argparse.Namespace) -> list[str]:
         "-p",
         str(args.port),
         "-o",
-        "BatchMode=no",
-        "-o",
-        "PreferredAuthentications=password,keyboard-interactive",
-        "-o",
-        "PubkeyAuthentication=no",
-        "-o",
-        "NumberOfPasswordPrompts=1",
-        "-o",
         f"StrictHostKeyChecking={'accept-new' if args.accept_host_key else 'yes'}",
         f"{args.user}@{args.host}",
     ]
+
+    if args.password:
+        command[1:1] = [
+            "-o",
+            "BatchMode=no",
+            "-o",
+            "PreferredAuthentications=password,keyboard-interactive",
+            "-o",
+            "PubkeyAuthentication=no",
+            "-o",
+            "NumberOfPasswordPrompts=1",
+        ]
+    else:
+        command[1:1] = [
+            "-o",
+            "BatchMode=yes",
+        ]
 
     if args.tty:
         command.extend(["bash", "-lc", shlex.quote(args.command[0])])
@@ -218,13 +267,15 @@ def run(args: argparse.Namespace) -> int:
     remote_script = "\n".join(commands) + "\n"
 
     with tempfile.TemporaryDirectory(prefix="remote-exec-") as temp_dir_str:
-        temp_dir = Path(temp_dir_str)
-        askpass_path = create_askpass_script(temp_dir)
         env = os.environ.copy()
-        env["REMOTE_EXEC_SSH_PASSWORD"] = args.password
-        env["SSH_ASKPASS"] = str(askpass_path)
-        env["SSH_ASKPASS_REQUIRE"] = "force"
-        env.setdefault("DISPLAY", "remote-exec")
+
+        if args.password:
+            temp_dir = Path(temp_dir_str)
+            askpass_path = create_askpass_script(temp_dir)
+            env[PASSWORD_ENV] = args.password
+            env["SSH_ASKPASS"] = str(askpass_path)
+            env["SSH_ASKPASS_REQUIRE"] = "force"
+            env.setdefault("DISPLAY", "remote-exec")
 
         ssh_command = build_ssh_command(args)
         info(f"connecting to {args.user}@{args.host}:{args.port}")
