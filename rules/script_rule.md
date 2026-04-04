@@ -67,7 +67,7 @@
 ### 公共库复用
 
 + Shell 脚本优先复用 `script/_lib/common.sh`
-+ Python 脚本优先复用 `script/_lib/cli.py`、`script/_lib/paths.py`、`script/_lib/logging.py`
++ Python 脚本优先复用 `script/_lib/common.py`
 + 路径解析、日志初始化、通用参数等基础能力，优先沉淀到公共库，不在多个脚本中重复实现
 
 ### 变更要求
