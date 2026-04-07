@@ -154,8 +154,8 @@ def validate_tty_commands(args: argparse.Namespace, commands: list[str]) -> None
         raise SystemExit("[ERROR] --tty requires exactly one --command")
 
 
-def create_askpass_script(temp_dir: Path) -> Path:
-    script_path = Path(__file__).resolve()
+def create_askpass_script(temp_dir: Path, script_path: Path | None = None) -> Path:
+    script_path = script_path or Path(__file__).resolve()
     python_path = Path(sys.executable).resolve()
 
     if os.name == "nt":
@@ -176,6 +176,32 @@ def create_askpass_script(temp_dir: Path) -> Path:
     return askpass_path
 
 
+def build_ssh_options(password: str | None, accept_host_key: bool) -> list[str]:
+    options = [
+        "-o",
+        f"StrictHostKeyChecking={'accept-new' if accept_host_key else 'yes'}",
+    ]
+
+    if password:
+        options[0:0] = [
+            "-o",
+            "BatchMode=no",
+            "-o",
+            "PreferredAuthentications=password,keyboard-interactive",
+            "-o",
+            "PubkeyAuthentication=no",
+            "-o",
+            "NumberOfPasswordPrompts=1",
+        ]
+    else:
+        options[0:0] = [
+            "-o",
+            "BatchMode=yes",
+        ]
+
+    return options
+
+
 def stream_bytes(source: BinaryIO, destination: BinaryIO) -> None:
     while True:
         chunk = source.read(1)
@@ -191,27 +217,9 @@ def build_ssh_command(args: argparse.Namespace) -> list[str]:
         "-tt" if args.tty else "-T",
         "-p",
         str(args.port),
-        "-o",
-        f"StrictHostKeyChecking={'accept-new' if args.accept_host_key else 'yes'}",
+        *build_ssh_options(args.password, args.accept_host_key),
         f"{args.user}@{args.host}",
     ]
-
-    if args.password:
-        command[1:1] = [
-            "-o",
-            "BatchMode=no",
-            "-o",
-            "PreferredAuthentications=password,keyboard-interactive",
-            "-o",
-            "PubkeyAuthentication=no",
-            "-o",
-            "NumberOfPasswordPrompts=1",
-        ]
-    else:
-        command[1:1] = [
-            "-o",
-            "BatchMode=yes",
-        ]
 
     if args.tty:
         command.extend(["bash", "-lc", shlex.quote(args.command[0])])
