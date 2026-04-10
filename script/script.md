@@ -11,6 +11,7 @@
 # 远程执行
 
 + 脚本名称[remote_ssh_exec.py]：跨平台通过 SSH 执行远程 Linux bash 命令，并实时输出结果。必填参数：`--host`、`--user`，以及 `--command` 或 `--command-file`，也可通过环境变量 `REMOTE_SSH_HOST`、`REMOTE_SSH_PORT`、`REMOTE_SSH_USER`、`REMOTE_SSH_PASSWORD` 提供连接参数。可选参数：`--password`、`--port`、`--accept-host-key`、`--tty`、`--verbose`。密码可省略，省略时使用 ssh key 或 ssh-agent。示例：`python script/remote_ssh_exec.py --command "pwd"`
++ 脚本名称[remote_ssh_transfer.py]：跨平台通过 SSH 在本地与远程 Linux 服务器之间传输文件或目录。必填参数：子命令 `upload` 或 `download`、`--host`、`--user`、`--destination`，以及至少一个 `--source`，也可通过环境变量 `REMOTE_SSH_HOST`、`REMOTE_SSH_PORT`、`REMOTE_SSH_USER`、`REMOTE_SSH_PASSWORD` 提供连接参数。可选参数：`--password`、`--port`、`--accept-host-key`、`--verbose`。`upload` 表示上传本地源到远程目录，`download` 表示下载远程源到本地目录。示例：`python script/remote_ssh_transfer.py upload --source ./dist --destination /tmp/deploy`
 
 # 网络调优
 
