@@ -21,4 +21,4 @@
 
 # 打包解压
 
-+ 脚本名称[tar_path_map.sh]：按映射规则打包或解压 tar 压缩包，并支持在同一规则文件中定义 `include(...)`、`exclude(...)` 规则。必填参数：子命令 `pack` 或 `unpack`、`--archive`，`pack` 还需要至少一个 `--map` 或 `--map-file`，`unpack` 需要 `--output` 或至少一个 `--map`/`--map-file`。可选参数：`--map`、`--map-file`、`--output`、`--verbose`。示例：`script/tar_path_map.sh pack --archive backup.tar.gz --map-file ./mapping.txt`
++ 脚本名称[tar_path_map.sh]：按映射规则打包或解压 tar 压缩包，并支持在同一规则文件中定义 `include(...)`、`exclude(...)` 规则，可在 Linux Shell 和 Git Bash on Windows 中使用。必填参数：子命令 `pack` 或 `unpack`、`--archive`，`pack` 还需要至少一个 `--map` 或 `--map-file`，`unpack` 需要 `--output` 或至少一个 `--map`/`--map-file`。可选参数：`--map`、`--map-file`、`--output`、`--verbose`。映射格式统一为 `archive/path|local/path`。示例：`script/tar_path_map.sh pack --archive backup.tar.gz --map code|C:\work\code`

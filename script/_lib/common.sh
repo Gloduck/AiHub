@@ -14,13 +14,32 @@ repo_root() {
 
 resolve_from_cwd() {
   local raw_path="$1"
+  local normalized_path="$raw_path"
+  local drive_letter
 
   if [[ "$raw_path" = /* ]]; then
     realpath -m "$raw_path"
     return
   fi
 
-  realpath -m "$PWD/$raw_path"
+  if [[ "$raw_path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      normalized_path="$(cygpath -u "$raw_path")"
+    else
+      drive_letter="${raw_path:0:1}"
+      drive_letter="${drive_letter,}"
+      normalized_path="/$drive_letter/${raw_path:2}"
+      normalized_path="${normalized_path//\\//}"
+    fi
+    realpath -m "$normalized_path"
+    return
+  fi
+
+  if [[ ( "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* || "${OSTYPE:-}" == win32* ) && "$raw_path" == *\\* ]]; then
+    normalized_path="${raw_path//\\//}"
+  fi
+
+  realpath -m "$PWD/$normalized_path"
 }
 
 resolve_from_repo() {

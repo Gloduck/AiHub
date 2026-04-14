@@ -15,13 +15,15 @@ Usage:
 
 Purpose:
   Pack or unpack tar archives with archive-to-local path mapping rules.
+  Supports Linux shells and Git Bash on Windows.
 
 Direct mapping format:
-  archive/path:/real/path
+  archive/path|/real/path
+  archive/path|C:\\real\\path
 
 Rule file format:
-  include(archive/path:/real/path)
-  exclude(archive/path:/real/path/pattern)
+  include(archive/path|/real/path)
+  exclude(archive/path|/real/path/pattern)
 
 Behavior:
   For pack, directory sources are packed as the contents under the archive path.
@@ -36,7 +38,7 @@ Required inputs:
   unpack: --archive and either --output, or at least one --map/--map-file
 
 Optional inputs:
-  --map RULE         Mapping rule in archive/path:/real/path format. Can be repeated.
+  --map RULE         Mapping rule in archive/path|/real/path format. Can be repeated.
   --map-file FILE    Text file with include(...) and optional exclude(...) rules.
   --output DIR       Extract the whole archive to this directory. Only for unpack.
   --verbose          Print debug logs.
@@ -50,11 +52,13 @@ Requirements:
   Requires tar and cp. Writing .tar.gz or .tgz also requires gzip.
 
 Examples:
-  script/tar_path_map.sh pack --archive backup.tar.gz --map code:/home/gloduck/code
-  script/tar_path_map.sh pack --archive backup.tar.gz --map software/opencode.sh:/software/opencode.sh
+  script/tar_path_map.sh pack --archive backup.tar.gz --map code|/home/gloduck/code
+  script/tar_path_map.sh pack --archive backup.tar.gz --map code|C:\\work\\code
+  script/tar_path_map.sh pack --archive backup.tar.gz --map software/opencode.sh|/software/opencode.sh
   script/tar_path_map.sh pack --archive backup.tar.gz --map-file ./mapping.txt
   script/tar_path_map.sh unpack --archive backup.tar.gz --output ./restore
-  script/tar_path_map.sh unpack --archive backup.tar.gz --map code:./restore/code
+  script/tar_path_map.sh unpack --archive backup.tar.gz --map code|.\\restore\\code
+  script/tar_path_map.sh unpack --archive backup.tar.gz --map code|./restore/code
 EOF
 }
 
@@ -112,11 +116,11 @@ parse_mapping() {
   local raw_mapping="$1"
   local -n archive_out="$2"
   local -n filesystem_out="$3"
-  local archive_part="${raw_mapping%%:*}"
-  local filesystem_part="${raw_mapping#*:}"
+  local archive_part="${raw_mapping%%|*}"
+  local filesystem_part="${raw_mapping#*|}"
 
-  [[ "$raw_mapping" == *:* ]] || die "mapping must look like archive/path:/real/path: $raw_mapping"
-  [[ -n "$filesystem_part" ]] || die "mapping must look like archive/path:/real/path: $raw_mapping"
+  [[ "$raw_mapping" == *'|'* ]] || die "mapping must look like archive/path|/real/path: $raw_mapping"
+  [[ -n "$filesystem_part" ]] || die "mapping must look like archive/path|/real/path: $raw_mapping"
 
   archive_part="$(trim_whitespace "$archive_part")"
   filesystem_part="$(trim_whitespace "$filesystem_part")"
