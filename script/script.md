@@ -18,3 +18,7 @@
 # 网络调优
 
 + 脚本名称[switch_tcp_congestion_control.sh]：切换 Linux 系统 TCP 拥塞控制算法并写入持久化配置。必填参数：`--algorithm`。可选参数：`--verbose`。示例：`sudo script/switch_tcp_congestion_control.sh --algorithm bbr`
+
+# 打包解压
+
++ 脚本名称[tar_path_map.sh]：按映射规则打包或解压 tar 压缩包，并支持在同一规则文件中定义 `include(...)`、`exclude(...)` 规则。必填参数：子命令 `pack` 或 `unpack`、`--archive`，`pack` 还需要至少一个 `--map` 或 `--map-file`，`unpack` 需要 `--output` 或至少一个 `--map`/`--map-file`。可选参数：`--map`、`--map-file`、`--output`、`--verbose`。示例：`script/tar_path_map.sh pack --archive backup.tar.gz --map-file ./mapping.txt`

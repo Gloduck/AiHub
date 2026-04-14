@@ -33,6 +33,14 @@ ensure_parent_dir() {
   mkdir -p "$(dirname "$1")"
 }
 
+trim_whitespace() {
+  local value="$1"
+
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s\n' "$value"
+}
+
 log() {
   local level="$1"
   shift
@@ -47,6 +55,10 @@ debug() {
 
 info() {
   log "INFO" "$@"
+}
+
+warn() {
+  log "WARN" "$@"
 }
 
 die() {
