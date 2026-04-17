@@ -89,5 +89,15 @@
         "windows-arm64": "https://www.python.org/ftp/python/3.12.7/python-3.12.7-embed-arm64.zip"
       }
     }
+  },
+  "golang": {
+    "version": {
+      "1.26.2": {
+        "linux-x64": "https://go.dev/dl/go1.26.2.linux-amd64.tar.gz",
+        "linux-arm64": "https://go.dev/dl/go1.26.2.linux-arm64.tar.gz",
+        "windows-x64": "https://go.dev/dl/go1.26.2.windows-amd64.zip",
+        "windows-arm64": "https://go.dev/dl/go1.26.2.windows-arm64.zip"
+      }
+    }
   }
 }

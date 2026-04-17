@@ -1,7 +1,7 @@
 # 环境安装
 
-+ 脚本名称[install_env.sh]：Linux 环境安装脚本，用于安装 node、maven、java、python。必填参数：`--env`、`--version`、`--install-dir`。可选参数：`--arch`、`--config`、`--force`、`--no-profile`、`--verbose`。示例：`script/install_env.sh --env node --version 20.18.0 --install-dir /opt/node`
-+ 脚本名称[install_env.bat]：Windows 环境安装脚本，用于安装 node、maven、java、python。必填参数：`--env`、`--version`、`--install-dir`。可选参数：`--arch`、`--config`、`--force`、`--no-profile`。示例：`script\install_env.bat --env node --version 20.18.0 --install-dir D:\tools\node`
++ 脚本名称[install_env.sh]：Linux 环境安装脚本，用于安装 node、maven、java、python、golang。必填参数：`--env`、`--version`、`--install-dir`。可选参数：`--arch`、`--config`、`--force`、`--no-profile`、`--verbose`。示例：`script/install_env.sh --env golang --version 1.26.2 --install-dir /opt/golang`
++ 脚本名称[install_env.bat]：Windows 环境安装脚本，用于安装 node、maven、java、python、golang。必填参数：`--env`、`--version`、`--install-dir`。可选参数：`--arch`、`--config`、`--force`、`--no-profile`。示例：`script\install_env.bat --env golang --version 1.26.2 --install-dir D:\tools\golang`
 
 # 环境变量
 

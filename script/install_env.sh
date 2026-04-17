@@ -10,7 +10,7 @@ usage() {
 Usage: install_env.sh [--env NAME] [--version VERSION] [--install-dir PATH] [--arch ARCH] [--config PATH] [--force] [--no-profile] [--verbose]
 
 Required inputs:
-  --env          node | maven | java | python
+  --env          node | maven | java | python | golang
   --version      package version from config json
   --install-dir  install target directory
 
@@ -43,7 +43,7 @@ detect_arch() {
 
 validate_env_name() {
   case "$1" in
-    node|maven|java|python) ;;
+    node|maven|java|python|golang) ;;
     *)
       die "unsupported env: $1"
       ;;
@@ -85,7 +85,7 @@ prompt_numbered_choice() {
 }
 
 prompt_env_numbered() {
-  env_name="$(prompt_numbered_choice "Please select env" node maven java python)"
+  env_name="$(prompt_numbered_choice "Please select env" node maven java python golang)"
 }
 
 prompt_version_numbered() {
@@ -254,6 +254,13 @@ EOF
     python)
       cat >"$target_file" <<EOF
 #!/usr/bin/env sh
+export PATH="$install_dir/bin:\$PATH"
+EOF
+      ;;
+    golang)
+      cat >"$target_file" <<EOF
+#!/usr/bin/env sh
+export GOROOT="$install_dir"
 export PATH="$install_dir/bin:\$PATH"
 EOF
       ;;

@@ -135,7 +135,7 @@ exit /b 0
 echo Usage: install_env.bat [--env NAME] [--version VERSION] [--install-dir PATH] [--arch ARCH] [--config PATH] [--force] [--no-profile]
 echo.
 echo Required inputs:
-echo   --env          node ^| maven ^| java ^| python
+echo   --env          node ^| maven ^| java ^| python ^| golang
 echo   --version      package version from config json
 echo   --install-dir  install target directory
 echo.
@@ -166,6 +166,7 @@ if /i "%VALUE%"=="node" exit /b 0
 if /i "%VALUE%"=="maven" exit /b 0
 if /i "%VALUE%"=="java" exit /b 0
 if /i "%VALUE%"=="python" exit /b 0
+if /i "%VALUE%"=="golang" exit /b 0
 echo [ERROR] unsupported env: %VALUE%
 exit /b 1
 
@@ -181,11 +182,13 @@ echo 1. node
 echo 2. maven
 echo 3. java
 echo 4. python
+echo 5. golang
 set /p "CHOICE=Please select env: "
 if "%CHOICE%"=="1" set "ENV_NAME=node"
 if "%CHOICE%"=="2" set "ENV_NAME=maven"
 if "%CHOICE%"=="3" set "ENV_NAME=java"
 if "%CHOICE%"=="4" set "ENV_NAME=python"
+if "%CHOICE%"=="5" set "ENV_NAME=golang"
 if not defined ENV_NAME (
   echo [ERROR] invalid selection: %CHOICE%
   exit /b 1
@@ -277,7 +280,7 @@ if errorlevel 1 exit /b 1
 exit /b 0
 
 :write_user_env
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; $envName = $env:INSTALLER_ENV_NAME; $version = $env:INSTALLER_VERSION; $installDir = $env:INSTALLER_INSTALL_DIR; $userPath = [Environment]::GetEnvironmentVariable('Path', 'User'); $script:pathEntries = @(); if ($userPath) { $script:pathEntries = @($userPath -split ';' | Where-Object { $_ -and $_.Trim() -ne '' }) }; function Add-PathEntry([string]$entry) { if (-not $entry) { return }; $normalized = $entry.TrimEnd('\'); $exists = $false; foreach ($item in $script:pathEntries) { if ($item.TrimEnd('\') -ieq $normalized) { $exists = $true; break } }; if (-not $exists) { $script:pathEntries += $entry } }; if ($envName -eq 'node') { Add-PathEntry $installDir; Add-PathEntry (Join-Path $installDir 'bin') } elseif ($envName -eq 'maven') { [Environment]::SetEnvironmentVariable('M2_HOME', $installDir, 'User'); Add-PathEntry (Join-Path $installDir 'bin') } elseif ($envName -eq 'java') { [Environment]::SetEnvironmentVariable('JAVA_HOME', $installDir, 'User'); if ($version -like 'graalvm-*') { [Environment]::SetEnvironmentVariable('GRAALVM_HOME', $installDir, 'User') } else { [Environment]::SetEnvironmentVariable('GRAALVM_HOME', $null, 'User') }; Add-PathEntry (Join-Path $installDir 'bin') } elseif ($envName -eq 'python') { Add-PathEntry $installDir; Add-PathEntry (Join-Path $installDir 'Scripts') }; [Environment]::SetEnvironmentVariable('Path', (($script:pathEntries | Where-Object { $_ -and $_.Trim() -ne '' }) -join ';'), 'User')"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; $envName = $env:INSTALLER_ENV_NAME; $version = $env:INSTALLER_VERSION; $installDir = $env:INSTALLER_INSTALL_DIR; $userPath = [Environment]::GetEnvironmentVariable('Path', 'User'); $script:pathEntries = @(); if ($userPath) { $script:pathEntries = @($userPath -split ';' | Where-Object { $_ -and $_.Trim() -ne '' }) }; function Add-PathEntry([string]$entry) { if (-not $entry) { return }; $normalized = $entry.TrimEnd('\'); $exists = $false; foreach ($item in $script:pathEntries) { if ($item.TrimEnd('\') -ieq $normalized) { $exists = $true; break } }; if (-not $exists) { $script:pathEntries += $entry } }; if ($envName -eq 'node') { Add-PathEntry $installDir; Add-PathEntry (Join-Path $installDir 'bin') } elseif ($envName -eq 'maven') { [Environment]::SetEnvironmentVariable('M2_HOME', $installDir, 'User'); Add-PathEntry (Join-Path $installDir 'bin') } elseif ($envName -eq 'java') { [Environment]::SetEnvironmentVariable('JAVA_HOME', $installDir, 'User'); if ($version -like 'graalvm-*') { [Environment]::SetEnvironmentVariable('GRAALVM_HOME', $installDir, 'User') } else { [Environment]::SetEnvironmentVariable('GRAALVM_HOME', $null, 'User') }; Add-PathEntry (Join-Path $installDir 'bin') } elseif ($envName -eq 'python') { Add-PathEntry $installDir; Add-PathEntry (Join-Path $installDir 'Scripts') } elseif ($envName -eq 'golang') { [Environment]::SetEnvironmentVariable('GOROOT', $installDir, 'User'); Add-PathEntry (Join-Path $installDir 'bin') }; [Environment]::SetEnvironmentVariable('Path', (($script:pathEntries | Where-Object { $_ -and $_.Trim() -ne '' }) -join ';'), 'User')"
 if errorlevel 1 exit /b 1
 exit /b 0
 
