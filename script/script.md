@@ -2,6 +2,7 @@
 
 + 脚本名称[install_env.sh]：Linux 环境安装脚本，用于安装 node、maven、java、python、golang。必填参数：`--env`、`--version`、`--install-dir`。可选参数：`--arch`、`--config`、`--force`、`--no-profile`、`--verbose`。示例：`script/install_env.sh --env golang --version 1.26.2 --install-dir /opt/golang`
 + 脚本名称[install_env.bat]：Windows 环境安装脚本，用于安装 node、maven、java、python、golang。必填参数：`--env`、`--version`、`--install-dir`。可选参数：`--arch`、`--config`、`--force`、`--no-profile`。示例：`script\install_env.bat --env golang --version 1.26.2 --install-dir D:\tools\golang`
++ 脚本名称[install_playwright_cli.sh]：全局安装或卸载 `@playwright/cli`，并将 skills 安装到或卸载自 OpenCode 和/或 Claude 的全局或项目目录。必填参数：`install` 或 `uninstall`。可选参数：`--scope`、`--target`、`--version`、`--project-dir`、`--verbose`。示例：`script/install_playwright_cli.sh install --scope global`
 
 # 环境变量
 
