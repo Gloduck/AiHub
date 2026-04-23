@@ -10,9 +10,9 @@ source "$SCRIPT_DIR/_lib/common.sh"
 
 SCRIPT_VERBOSE=0
 FORMAT=""
+FORMAT_EXPLICIT=0
 MODEL=""
 PROMPT=""
-PROMPT_FILE=""
 BASE_URL=""
 API_KEY=""
 MAX_TOKENS=""
@@ -20,23 +20,33 @@ TEMPERATURE=""
 DECLARE_RESPONSE_PATH=""
 RAW_RESPONSE=0
 DRY_RUN=0
+LIST_MODELS=0
+SUBCOMMAND=""
 IMAGE_PATHS=()
 
 usage() {
   cat <<EOF
-Usage: script/${SCRIPT_NAME} --format openai|claude --model MODEL [options]
+Usage:
+  script/${SCRIPT_NAME} message PROMPT --model MODEL [options]
+  script/${SCRIPT_NAME} models [options]
+  script/${SCRIPT_NAME} --format openai|claude (--model MODEL [options] | --list-models [options])
 
 Purpose:
-  Send a prompt to a third-party AI API using the official OpenAI or Claude request format.
+  Send a prompt to a third-party AI API using the official OpenAI or Claude request format,
+  or query the upstream /v1/models endpoint for available models.
 
 Required inputs:
-  --format         request format: openai or claude
-  --model          model name passed to the upstream API
+  message          send one prompt request
+  models           fetch available models from the upstream /v1/models endpoint
+  --format         request format: openai or claude; when omitted, infer from env
+  --model          model name passed to the upstream API; required for message
+
+Operation:
+  --list-models    legacy alias for models
 
 Prompt inputs:
-  --prompt TEXT        prompt text
-  --prompt-file PATH   read prompt text from file
-  stdin                when --prompt and --prompt-file are both omitted, read prompt from stdin
+  PROMPT               first positional argument after message
+                      required with message
 
 Optional inputs:
   --image PATH         attach an image; may be provided multiple times
@@ -51,19 +61,26 @@ Optional inputs:
   --help               show this message
 
 Environment variable lookup order:
+  Format:  THIRDPARTY_AI_PLATFORM_FORMAT -> OPENAI_BASE_URL -> ANTHROPIC_BASE_URL/CLAUDE_BASE_URL
   Generic: THIRDPARTY_AI_PLATFORM_API_KEY, THIRDPARTY_AI_PLATFORM_BASE_URL
   OpenAI:  OPENAI_API_KEY, OPENAI_BASE_URL
   Claude:  ANTHROPIC_API_KEY, CLAUDE_API_KEY, ANTHROPIC_BASE_URL, CLAUDE_BASE_URL
 
+Format inference when --format is omitted:
+  1. THIRDPARTY_AI_PLATFORM_FORMAT
+  2. OPENAI_BASE_URL -> openai
+  3. ANTHROPIC_BASE_URL or CLAUDE_BASE_URL -> claude
+  4. If only THIRDPARTY_AI_PLATFORM_BASE_URL is set, provide --format or THIRDPARTY_AI_PLATFORM_FORMAT
+
 Default endpoints appended to --base-url:
-  openai -> /v1/chat/completions
-  claude -> /v1/messages
+  openai -> /v1/chat/completions, or /v1/models with models
+  claude -> /v1/messages, or /v1/models with models
 
 Notes:
   - Images are embedded as base64 in the official provider-specific payload shape.
   - If you store values in env.ini, load them first with: source script/load_env.sh
   - Side effect: sends an HTTP request unless --dry-run is used.
-  - Normal output only prints the AI text response unless --raw-response is used.
+  - Normal output prints AI text, or newline-separated model IDs with models, unless --raw-response is used.
 EOF
 }
 
@@ -114,22 +131,8 @@ encode_base64() {
 }
 
 read_prompt() {
-  if [[ -n "$PROMPT" ]]; then
-    printf '%s' "$PROMPT"
-    return
-  fi
-
-  if [[ -n "$PROMPT_FILE" ]]; then
-    [[ -f "$PROMPT_FILE" ]] || die "prompt file not found: $PROMPT_FILE"
-    <"$PROMPT_FILE" tr -d '\r'
-    return
-  fi
-
-  if [[ -t 0 ]]; then
-    die "missing prompt: use --prompt, --prompt-file, or pipe stdin"
-  fi
-
-  tr -d '\r'
+  [[ -n "$PROMPT" ]] || die "missing prompt: use message \"...\""
+  printf '%s' "$PROMPT"
 }
 
 resolve_api_key() {
@@ -149,6 +152,34 @@ resolve_api_key() {
       die "unsupported format: $FORMAT"
       ;;
   esac
+}
+
+infer_format() {
+  if [[ "$FORMAT_EXPLICIT" == "1" ]]; then
+    printf '%s\n' "$FORMAT"
+    return
+  fi
+
+  if [[ -n "${THIRDPARTY_AI_PLATFORM_FORMAT:-}" ]]; then
+    printf '%s\n' "$THIRDPARTY_AI_PLATFORM_FORMAT"
+    return
+  fi
+
+  if [[ -n "${OPENAI_BASE_URL:-}" ]]; then
+    printf 'openai\n'
+    return
+  fi
+
+  if [[ -n "${ANTHROPIC_BASE_URL:-}" || -n "${CLAUDE_BASE_URL:-}" ]]; then
+    printf 'claude\n'
+    return
+  fi
+
+  if [[ -n "${THIRDPARTY_AI_PLATFORM_BASE_URL:-}" ]]; then
+    die "missing format: use --format or set THIRDPARTY_AI_PLATFORM_FORMAT"
+  fi
+
+  die "missing required argument: --format"
 }
 
 resolve_base_url() {
@@ -257,6 +288,11 @@ build_payload() {
 build_endpoint() {
   local resolved_base_url="$1"
 
+  if [[ "$LIST_MODELS" == "1" ]]; then
+    printf '%s/v1/models\n' "$resolved_base_url"
+    return
+  fi
+
   case "$FORMAT" in
     openai)
       printf '%s/v1/chat/completions\n' "$resolved_base_url"
@@ -299,11 +335,27 @@ extract_response_text() {
   esac
 }
 
+extract_models_list() {
+  local response_body="$1"
+
+  jq -er '
+    if type == "array" then
+      [.[]? | .id // .name]
+    elif type == "object" and (has("data")) and (.data | type) == "array" then
+      [.data[]? | .id // .name]
+    else
+      []
+    end
+    | if length == 0 then error("no models found in response") else .[] end
+  ' <<<"$response_body"
+}
+
 send_request() {
   local endpoint="$1"
   local resolved_api_key="$2"
   local payload="$3"
   local -a curl_args=()
+  local request_method="POST"
   local response_body
   local response_text
   local output_value
@@ -325,11 +377,22 @@ send_request() {
       ;;
   esac
 
+  if [[ "$LIST_MODELS" == "1" ]]; then
+    request_method="GET"
+  fi
+
   debug "sending request to $endpoint"
-  response_body="$(curl --silent --show-error --fail-with-body -X POST "$endpoint" "${curl_args[@]}" --data "$payload")"
+  if [[ "$LIST_MODELS" == "1" ]]; then
+    response_body="$(curl --silent --show-error --fail-with-body -X "$request_method" "$endpoint" "${curl_args[@]}")"
+  else
+    response_body="$(curl --silent --show-error --fail-with-body -X "$request_method" "$endpoint" "${curl_args[@]}" --data "$payload")"
+  fi
 
   if [[ "$RAW_RESPONSE" == "1" ]]; then
     output_value="$response_body"
+  elif [[ "$LIST_MODELS" == "1" ]]; then
+    response_text="$(extract_models_list "$response_body")"
+    output_value="$response_text"
   else
     response_text="$(extract_response_text "$response_body")"
     output_value="$response_text"
@@ -339,26 +402,31 @@ send_request() {
 }
 
 parse_args() {
+  if [[ $# -gt 0 ]]; then
+    case "$1" in
+      message)
+        SUBCOMMAND="message"
+        shift
+        ;;
+      models)
+        SUBCOMMAND="models"
+        LIST_MODELS=1
+        shift
+        ;;
+    esac
+  fi
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --format)
         [[ $# -ge 2 ]] || die "--format requires a value"
         FORMAT="$2"
+        FORMAT_EXPLICIT=1
         shift 2
         ;;
       --model)
         [[ $# -ge 2 ]] || die "--model requires a value"
         MODEL="$2"
-        shift 2
-        ;;
-      --prompt)
-        [[ $# -ge 2 ]] || die "--prompt requires a value"
-        PROMPT="$2"
-        shift 2
-        ;;
-      --prompt-file)
-        [[ $# -ge 2 ]] || die "--prompt-file requires a value"
-        PROMPT_FILE="$(resolve_from_cwd "$2")"
         shift 2
         ;;
       --image)
@@ -390,6 +458,10 @@ parse_args() {
         RAW_RESPONSE=1
         shift
         ;;
+      --list-models)
+        LIST_MODELS=1
+        shift
+        ;;
       --output)
         [[ $# -ge 2 ]] || die "--output requires a value"
         DECLARE_RESPONSE_PATH="$(resolve_from_cwd "$2")"
@@ -408,18 +480,41 @@ parse_args() {
         exit 0
         ;;
       *)
+        if [[ "$SUBCOMMAND" == "message" && -z "$PROMPT" ]]; then
+          PROMPT="$1"
+          shift
+          continue
+        fi
         die "unknown argument: $1"
         ;;
     esac
   done
 
-  [[ -n "$FORMAT" ]] || die "missing required argument: --format"
+  FORMAT="$(infer_format)"
   [[ "$FORMAT" == "openai" || "$FORMAT" == "claude" ]] || die "--format must be openai or claude"
-  [[ -n "$MODEL" ]] || die "missing required argument: --model"
 
-  if [[ -n "$PROMPT" && -n "$PROMPT_FILE" ]]; then
-    die "--prompt and --prompt-file cannot be used together"
+  if [[ -z "$SUBCOMMAND" ]]; then
+    if [[ "$LIST_MODELS" == "1" ]]; then
+      SUBCOMMAND="models"
+    else
+      SUBCOMMAND="message"
+    fi
   fi
+
+  if [[ "$SUBCOMMAND" == "message" && "$LIST_MODELS" == "1" ]]; then
+    die "message cannot be used with --list-models"
+  fi
+
+  if [[ "$LIST_MODELS" == "1" ]]; then
+    [[ -z "$MODEL" ]] || die "--model cannot be used with --list-models"
+    [[ -z "$PROMPT" ]] || die "PROMPT cannot be used with --list-models"
+    [[ ${#IMAGE_PATHS[@]} -eq 0 ]] || die "--image cannot be used with --list-models"
+    [[ -z "$MAX_TOKENS" ]] || die "--max-tokens cannot be used with --list-models"
+    [[ -z "$TEMPERATURE" ]] || die "--temperature cannot be used with --list-models"
+    return
+  fi
+
+  [[ -n "$MODEL" ]] || die "missing required argument: --model"
 
   if [[ -n "$MAX_TOKENS" && ! "$MAX_TOKENS" =~ ^[0-9]+$ ]]; then
     die "--max-tokens must be an integer"
@@ -432,27 +527,35 @@ parse_args() {
 }
 
 main() {
-  local prompt_text
+  local prompt_text=""
   local resolved_api_key=""
   local resolved_base_url
   local endpoint
-  local payload
-
-  require_cmd curl
-  require_cmd jq
-  require_cmd base64
+  local payload=""
 
   parse_args "$@"
 
-  prompt_text="$(read_prompt)"
+  require_cmd curl
+  require_cmd jq
+  if [[ "$LIST_MODELS" != "1" && ${#IMAGE_PATHS[@]} -gt 0 ]]; then
+    require_cmd base64
+  fi
+
   resolved_base_url="$(resolve_base_url)"
   endpoint="$(build_endpoint "$resolved_base_url")"
-  payload="$(build_payload "$prompt_text")"
+
+  if [[ "$LIST_MODELS" != "1" ]]; then
+    prompt_text="$(read_prompt)"
+    payload="$(build_payload "$prompt_text")"
+  fi
 
   if [[ "$DRY_RUN" == "1" ]]; then
     printf 'format=%s\n' "$FORMAT"
+    printf 'mode=%s\n' "$SUBCOMMAND"
     printf 'endpoint=%s\n' "$endpoint"
-    jq . <<<"$payload"
+    if [[ "$LIST_MODELS" != "1" ]]; then
+      jq . <<<"$payload"
+    fi
     return 0
   fi
 

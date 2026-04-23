@@ -11,7 +11,7 @@
 
 # AI 请求
 
-+ 脚本名称[request_thirdparty_ai_platform.sh]：按 OpenAI 官方或 Claude 官方请求格式调用三方 AI 接口，支持 prompt、图片输入，并从环境变量 `THIRDPARTY_AI_PLATFORM_API_KEY`、`THIRDPARTY_AI_PLATFORM_BASE_URL` 或 provider 专属变量读取配置，支持输出 AI 文本或原始响应。必填参数：`--format`、`--model`。可选参数：`--prompt`、`--prompt-file`、`--image`、`--base-url`、`--api-key`、`--max-tokens`、`--temperature`、`--raw-response`、`--output`、`--dry-run`、`--verbose`。示例：`script/request_thirdparty_ai_platform.sh --format openai --model gpt-4.1-mini --prompt "describe this image" --image ./demo.png`
++ 脚本名称[request_thirdparty_ai_platform.sh]：按 OpenAI 官方或 Claude 官方请求格式调用三方 AI 接口，支持图片输入，也支持请求 `/v1/models` 获取可用模型，并从环境变量 `THIRDPARTY_AI_PLATFORM_API_KEY`、`THIRDPARTY_AI_PLATFORM_BASE_URL`、`THIRDPARTY_AI_PLATFORM_FORMAT` 或 provider 专属变量读取配置，支持输出 AI 文本、模型 ID 列表或原始响应。必填参数：子命令 `message` 或 `models`，其中 `message` 需要位置参数 `PROMPT` 和 `--model`。可选参数：`--format`、`--image`、`--base-url`、`--api-key`、`--max-tokens`、`--temperature`、`--raw-response`、`--output`、`--dry-run`、`--verbose`。示例：`script/request_thirdparty_ai_platform.sh message "你好" --model gpt-5.4-mini`
 
 # 远程执行
 
