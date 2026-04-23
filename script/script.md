@@ -9,6 +9,10 @@
 + 脚本名称[load_env.sh]：读取 env.ini 并加载到当前 shell 环境变量，默认读取脚本同目录或者当前工作目录下的env.ini。可选参数：`--file`、`--verbose`。示例：`source script/load_env.sh --file ./env.ini`
 + 脚本名称[load_env.bat]：读取 env.ini 并加载到当前 cmd 环境变量，默认读取脚本同目录或者当前工作目录下的env.ini。可选参数：`--file`、`--verbose`。示例：`call script\load_env.bat --file .\env.ini`
 
+# AI 请求
+
++ 脚本名称[request_thirdparty_ai_platform.sh]：按 OpenAI 官方或 Claude 官方请求格式调用三方 AI 接口，支持 prompt、图片输入，并从环境变量 `THIRDPARTY_AI_PLATFORM_API_KEY`、`THIRDPARTY_AI_PLATFORM_BASE_URL` 或 provider 专属变量读取配置，支持输出 AI 文本或原始响应。必填参数：`--format`、`--model`。可选参数：`--prompt`、`--prompt-file`、`--image`、`--base-url`、`--api-key`、`--max-tokens`、`--temperature`、`--raw-response`、`--output`、`--dry-run`、`--verbose`。示例：`script/request_thirdparty_ai_platform.sh --format openai --model gpt-4.1-mini --prompt "describe this image" --image ./demo.png`
+
 # 远程执行
 
 + 脚本名称[remote_ssh_exec.py]：跨平台通过 SSH 执行远程 Linux bash 命令，并实时输出结果。必填参数：`--host`、`--user`，以及 `--command` 或 `--command-file`，也可通过环境变量 `REMOTE_SSH_HOST`、`REMOTE_SSH_PORT`、`REMOTE_SSH_USER`、`REMOTE_SSH_PASSWORD` 提供连接参数。可选参数：`--password`、`--port`、`--accept-host-key`、`--tty`、`--verbose`。密码可省略，省略时使用 ssh key 或 ssh-agent。示例：`python script/remote_ssh_exec.py --command "pwd"`
