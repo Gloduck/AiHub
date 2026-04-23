@@ -23,6 +23,7 @@ DRY_RUN=0
 LIST_MODELS=0
 SUBCOMMAND=""
 IMAGE_PATHS=()
+TEMP_FILES=()
 
 usage() {
   cat <<EOF
@@ -130,6 +131,22 @@ encode_base64() {
   fi
 }
 
+make_temp_file() {
+  local temp_file
+
+  temp_file="$(mktemp "${TMPDIR:-/tmp}/${SCRIPT_NAME}.XXXXXX")"
+  TEMP_FILES+=("$temp_file")
+  printf '%s\n' "$temp_file"
+}
+
+cleanup_temp_files() {
+  local temp_file
+
+  for temp_file in "${TEMP_FILES[@]}"; do
+    [[ -n "$temp_file" && -e "$temp_file" ]] && rm -f -- "$temp_file"
+  done
+}
+
 read_prompt() {
   [[ -n "$PROMPT" ]] || die "missing prompt: use message \"...\""
   printf '%s' "$PROMPT"
@@ -205,67 +222,80 @@ build_openai_content() {
   local prompt_text="$1"
   local image_path
   local mime_type
-  local encoded_image
-  local content_json
+  local content_file
+  local next_content_file
+  local encoded_image_file
 
-  content_json="$(jq -n --arg text "$prompt_text" '[{type:"text", text:$text}]')"
+  content_file="$(make_temp_file)"
+  jq -n --arg text "$prompt_text" '[{type:"text", text:$text}]' >"$content_file"
 
   for image_path in "${IMAGE_PATHS[@]}"; do
     [[ -f "$image_path" ]] || die "image file not found: $image_path"
     mime_type="$(infer_mime_type "$image_path")"
-    encoded_image="$(encode_base64 "$image_path")"
-    content_json="$(jq -n \
-      --argjson content "$content_json" \
+    encoded_image_file="$(make_temp_file)"
+    encode_base64 "$image_path" >"$encoded_image_file"
+    next_content_file="$(make_temp_file)"
+    jq -n \
+      --rawfile content_raw "$content_file" \
       --arg mime_type "$mime_type" \
-      --arg encoded_image "$encoded_image" \
-      '$content + [{type:"image_url", image_url:{url:("data:" + $mime_type + ";base64," + $encoded_image)}}]')"
+      --rawfile encoded_image "$encoded_image_file" \
+      '($content_raw | fromjson) + [{type:"image_url", image_url:{url:("data:" + $mime_type + ";base64," + $encoded_image)}}]' >"$next_content_file"
+    content_file="$next_content_file"
   done
 
-  printf '%s\n' "$content_json"
+  printf '%s\n' "$content_file"
 }
 
 build_claude_content() {
   local prompt_text="$1"
   local image_path
   local mime_type
-  local encoded_image
-  local content_json
+  local content_file
+  local next_content_file
+  local encoded_image_file
 
-  content_json="$(jq -n --arg text "$prompt_text" '[{type:"text", text:$text}]')"
+  content_file="$(make_temp_file)"
+  jq -n --arg text "$prompt_text" '[{type:"text", text:$text}]' >"$content_file"
 
   for image_path in "${IMAGE_PATHS[@]}"; do
     [[ -f "$image_path" ]] || die "image file not found: $image_path"
     mime_type="$(infer_mime_type "$image_path")"
-    encoded_image="$(encode_base64 "$image_path")"
-    content_json="$(jq -n \
-      --argjson content "$content_json" \
+    encoded_image_file="$(make_temp_file)"
+    encode_base64 "$image_path" >"$encoded_image_file"
+    next_content_file="$(make_temp_file)"
+    jq -n \
+      --rawfile content_raw "$content_file" \
       --arg mime_type "$mime_type" \
-      --arg encoded_image "$encoded_image" \
-      '$content + [{type:"image", source:{type:"base64", media_type:$mime_type, data:$encoded_image}}]')"
+      --rawfile encoded_image "$encoded_image_file" \
+      '($content_raw | fromjson) + [{type:"image", source:{type:"base64", media_type:$mime_type, data:$encoded_image}}]' >"$next_content_file"
+    content_file="$next_content_file"
   done
 
-  printf '%s\n' "$content_json"
+  printf '%s\n' "$content_file"
 }
 
 build_payload() {
   local prompt_text="$1"
-  local content_json
-  local payload
+  local content_file
+  local payload_file
+  local next_payload_file
 
   case "$FORMAT" in
     openai)
-      content_json="$(build_openai_content "$prompt_text")"
-      payload="$(jq -n \
+      content_file="$(build_openai_content "$prompt_text")"
+      payload_file="$(make_temp_file)"
+      jq -n \
         --arg model "$MODEL" \
-        --argjson content "$content_json" \
-        '{model:$model, messages:[{role:"user", content:$content}]}')"
+        --rawfile content_raw "$content_file" \
+        '{model:$model, messages:[{role:"user", content:($content_raw | fromjson)}]}' >"$payload_file"
       ;;
     claude)
-      content_json="$(build_claude_content "$prompt_text")"
-      payload="$(jq -n \
+      content_file="$(build_claude_content "$prompt_text")"
+      payload_file="$(make_temp_file)"
+      jq -n \
         --arg model "$MODEL" \
-        --argjson content "$content_json" \
-        '{model:$model, messages:[{role:"user", content:$content}]}')"
+        --rawfile content_raw "$content_file" \
+        '{model:$model, messages:[{role:"user", content:($content_raw | fromjson)}]}' >"$payload_file"
       ;;
     *)
       die "unsupported format: $FORMAT"
@@ -273,16 +303,22 @@ build_payload() {
   esac
 
   if [[ -n "$MAX_TOKENS" ]]; then
-    payload="$(jq -n --argjson payload "$payload" --argjson max_tokens "$MAX_TOKENS" '$payload + {max_tokens:$max_tokens}')"
+    next_payload_file="$(make_temp_file)"
+    jq -n --rawfile payload_raw "$payload_file" --argjson max_tokens "$MAX_TOKENS" '($payload_raw | fromjson) + {max_tokens:$max_tokens}' >"$next_payload_file"
+    payload_file="$next_payload_file"
   elif [[ "$FORMAT" == "claude" ]]; then
-    payload="$(jq -n --argjson payload "$payload" '$payload + {max_tokens:1024}')"
+    next_payload_file="$(make_temp_file)"
+    jq -n --rawfile payload_raw "$payload_file" '($payload_raw | fromjson) + {max_tokens:1024}' >"$next_payload_file"
+    payload_file="$next_payload_file"
   fi
 
   if [[ -n "$TEMPERATURE" ]]; then
-    payload="$(jq -n --argjson payload "$payload" --argjson temperature "$TEMPERATURE" '$payload + {temperature:$temperature}')"
+    next_payload_file="$(make_temp_file)"
+    jq -n --rawfile payload_raw "$payload_file" --argjson temperature "$TEMPERATURE" '($payload_raw | fromjson) + {temperature:$temperature}' >"$next_payload_file"
+    payload_file="$next_payload_file"
   fi
 
-  printf '%s\n' "$payload"
+  printf '%s\n' "$payload_file"
 }
 
 build_endpoint() {
@@ -353,7 +389,7 @@ extract_models_list() {
 send_request() {
   local endpoint="$1"
   local resolved_api_key="$2"
-  local payload="$3"
+  local payload_file="$3"
   local -a curl_args=()
   local request_method="POST"
   local response_body
@@ -385,7 +421,7 @@ send_request() {
   if [[ "$LIST_MODELS" == "1" ]]; then
     response_body="$(curl --silent --show-error --fail-with-body -X "$request_method" "$endpoint" "${curl_args[@]}")"
   else
-    response_body="$(curl --silent --show-error --fail-with-body -X "$request_method" "$endpoint" "${curl_args[@]}" --data "$payload")"
+    response_body="$(curl --silent --show-error --fail-with-body -X "$request_method" "$endpoint" "${curl_args[@]}" --data-binary "@$payload_file")"
   fi
 
   if [[ "$RAW_RESPONSE" == "1" ]]; then
@@ -531,7 +567,9 @@ main() {
   local resolved_api_key=""
   local resolved_base_url
   local endpoint
-  local payload=""
+  local payload_file=""
+
+  trap cleanup_temp_files EXIT
 
   parse_args "$@"
 
@@ -546,7 +584,7 @@ main() {
 
   if [[ "$LIST_MODELS" != "1" ]]; then
     prompt_text="$(read_prompt)"
-    payload="$(build_payload "$prompt_text")"
+    payload_file="$(build_payload "$prompt_text")"
   fi
 
   if [[ "$DRY_RUN" == "1" ]]; then
@@ -554,14 +592,14 @@ main() {
     printf 'mode=%s\n' "$SUBCOMMAND"
     printf 'endpoint=%s\n' "$endpoint"
     if [[ "$LIST_MODELS" != "1" ]]; then
-      jq . <<<"$payload"
+      jq . "$payload_file"
     fi
     return 0
   fi
 
   resolved_api_key="$(resolve_api_key)"
   [[ -n "$resolved_api_key" ]] || die "missing API key: use --api-key or set environment variables"
-  send_request "$endpoint" "$resolved_api_key" "$payload"
+  send_request "$endpoint" "$resolved_api_key" "$payload_file"
 }
 
 main "$@"
