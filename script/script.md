@@ -2,7 +2,7 @@
 
 + 脚本名称[install_env.sh]：Linux 环境安装脚本，用于安装 node、maven、java、python、golang。必填参数：`--env`、`--version`、`--install-dir`。可选参数：`--arch`、`--config`、`--force`、`--no-profile`、`--verbose`。示例：`script/install_env.sh --env golang --version 1.26.2 --install-dir /opt/golang`
 + 脚本名称[install_env.bat]：Windows 环境安装脚本，用于安装 node、maven、java、python、golang。必填参数：`--env`、`--version`、`--install-dir`。可选参数：`--arch`、`--config`、`--force`、`--no-profile`。示例：`script\install_env.bat --env golang --version 1.26.2 --install-dir D:\tools\golang`
-+ 脚本名称[install_playwright_cli.sh]：全局安装或卸载 `@playwright/cli`，并将 skills 安装到或卸载自 OpenCode 和/或 Claude 的全局或项目目录。必填参数：`install` 或 `uninstall`。可选参数：`--scope`、`--target`、`--version`、`--project-dir`、`--verbose`。示例：`script/install_playwright_cli.sh install --scope global`
++ 脚本名称[install_playwright_cli.sh]：管理 `@playwright/cli` 的全局安装与卸载、Playwright 系统依赖安装，以及按全局或项目 scope 初始化或清理 skills 和 `.playwright/` 工作区。必填参数：子命令 `install`、`uninstall`、`install-deps`、`init` 或 `clean`。可选参数：`--scope`、`--target`、`--version`、`--project-dir`、`--verbose`。示例：`script/install_playwright_cli.sh install-deps`
 
 # 环境变量
 

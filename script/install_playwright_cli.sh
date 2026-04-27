@@ -7,45 +7,60 @@ source "$SCRIPT_DIR/_lib/common.sh"
 
 usage() {
   cat <<'EOF'
-Usage: install_playwright_cli.sh [install|uninstall] [--scope SCOPE] [--target TARGET] [--version VERSION] [--project-dir PATH] [--verbose]
+Usage: install_playwright_cli.sh [install|uninstall|install-deps|init|clean] [--scope SCOPE] [--target TARGET] [--version VERSION] [--project-dir PATH] [--verbose]
 
 Required inputs:
-  install|uninstall
+  install|uninstall|install-deps|init|clean
 
 Optional inputs:
-  --scope            global | project, defaults to global
-  --target           all | opencode | claude, auto-detect when omitted
-  --version          npm package version, defaults to latest
-  --project-dir      target project directory, required when --scope project
+  --scope            global | project, used by init|clean, defaults to global
+  --target           all | opencode | claude, used by init|clean, auto-detect when omitted
+  --version          npm package version, used by install, defaults to latest
+  --project-dir      target project directory for init|clean when --scope project
   --verbose          print debug logs
   --help             show this message
 
 Default behavior:
-  playwright-cli is always installed or uninstalled globally with npm.
+  install installs @playwright/cli globally with npm, then installs default
+  Playwright artifacts for that installation using Playwright's default
+  browser-install behavior.
 
-  global scope writes skills to ~/.config/opencode/skills and/or
-  ~/.claude/skills. When --target is omitted, install only targets tools found
-  in PATH, and uninstall targets tools with an existing manifest or command.
+  uninstall removes Playwright artifacts for the current @playwright/cli
+  installation when the bundled Playwright uninstall command is available, then
+  uninstalls @playwright/cli globally with npm.
 
-  project scope writes skills to --project-dir/.opencode/skills and/or
-  --project-dir/.claude/skills. When --target is omitted, install only targets
-  tool directories that already exist in the project, and uninstall targets
-  tool directories or manifests that already exist in the project.
+  install-deps installs Playwright system dependencies using Playwright's
+  bundled dependency installer. This may require elevated privileges depending
+  on the host system.
+
+  init writes skills to ~/.config/opencode/skills and/or ~/.claude/skills for
+  global scope, or to --project-dir/.opencode/skills and/or
+  --project-dir/.claude/skills for project scope. It also preserves Playwright
+  CLI workspace files at ~/.playwright/ for global scope or
+  --project-dir/.playwright/ for project scope. When --target is omitted, init
+  only targets tools found in PATH for global scope, or tool directories that
+  already exist in the project for project scope.
+
+  clean removes skills and the .playwright/ directory for the selected scope.
+  When --target is omitted, clean removes targets with an existing manifest,
+  command, or project tool directory.
 
 Interactive mode:
   Not supported.
 
 Side effects:
-  Installs or uninstalls npm package @playwright/cli globally, creates or
-  removes skill directories, and writes or removes manifest files for the
-  selected OpenCode and/or Claude locations.
+  install/uninstall modify the global npm package @playwright/cli and may add
+  or remove Playwright artifacts under the current user's Playwright cache.
+  install-deps installs host system packages required by Playwright browsers.
+  init/clean create or remove skill directories, manifest files, and the
+  .playwright/ directory for the selected scope.
 EOF
 }
 
-validate_action() {
+validate_command_name() {
   case "$1" in
-    install|uninstall) ;;
-    *) die "unsupported action: $1" ;;
+    install|uninstall|install-deps|init|clean) ;;
+    *) die "unsupported command: $1" ;;
   esac
 }
 
@@ -124,6 +139,14 @@ manifest_exists_for_target() {
   [[ -f "$(manifest_path_for_target "$tool_name")" ]]
 }
 
+playwright_workspace_dir() {
+  case "$scope" in
+    global) printf '%s\n' "$HOME/.playwright" ;;
+    project) printf '%s\n' "$project_dir/.playwright" ;;
+    *) die "unsupported scope for Playwright workspace path: $scope" ;;
+  esac
+}
+
 add_selected_target() {
   local tool_name="$1"
   local existing
@@ -139,13 +162,13 @@ should_auto_select_target() {
   local tool_name="$1"
 
   if [[ "$scope" == "global" ]]; then
-    if [[ "$action" == "install" ]]; then
+    if [[ "$command_name" == "init" ]]; then
       has_global_target "$tool_name"
     else
       has_global_target "$tool_name" || manifest_exists_for_target "$tool_name"
     fi
   else
-    if [[ "$action" == "install" ]]; then
+    if [[ "$command_name" == "init" ]]; then
       has_project_target "$tool_name"
     else
       has_project_target "$tool_name" || manifest_exists_for_target "$tool_name"
@@ -175,11 +198,11 @@ resolve_selected_targets() {
   should_auto_select_target claude && add_selected_target claude
 
   if (( ${#selected_targets[@]} == 0 )); then
-    if [[ "$action" == "uninstall" ]]; then
-      warn "no skill targets detected, only playwright-cli will be uninstalled"
+    if [[ "$command_name" == "clean" ]]; then
+      warn "no skill targets detected, only .playwright directory will be cleaned"
       return
     fi
-    die "no install targets detected; use --target to specify opencode and/or claude"
+    die "no init targets detected; use --target to specify opencode and/or claude"
   fi
 }
 
@@ -221,6 +244,26 @@ uninstall_cli() {
 ensure_parent_of_file() {
   local file_path="$1"
   mkdir -p "$(dirname "$file_path")"
+}
+
+install_playwright_workspace() {
+  local source_dir="$1"
+  local target_dir
+
+  [[ -d "$source_dir" ]] || die "playwright-cli did not create workspace directory: $source_dir"
+  target_dir="$(playwright_workspace_dir)"
+  mkdir -p "$(dirname "$target_dir")"
+  rm -rf "$target_dir"
+  cp -a "$source_dir" "$target_dir"
+  info "installed Playwright workspace to $target_dir"
+}
+
+uninstall_playwright_workspace() {
+  local target_dir
+
+  target_dir="$(playwright_workspace_dir)"
+  rm -rf "$target_dir"
+  cleanup_dir_if_empty "$(dirname "$target_dir")"
 }
 
 collect_skill_items() {
@@ -295,6 +338,7 @@ install_target_skills() {
 
 run_skill_installer() {
   local tmp_dir
+  local workspace_dir
   local skill_dir
 
   tmp_dir="$(mktemp -d)"
@@ -305,8 +349,10 @@ run_skill_installer() {
 
   skill_dir="$tmp_dir/.claude/skills"
   [[ -d "$skill_dir" ]] || die "playwright-cli did not create skills directory: $skill_dir"
+  workspace_dir="$tmp_dir/.playwright"
 
   install_target_skills "$skill_dir"
+  install_playwright_workspace "$workspace_dir"
   rm -rf "$tmp_dir"
   trap - EXIT
 }
@@ -339,6 +385,67 @@ cleanup_dir_if_empty() {
   local dir_path="$1"
   [[ -d "$dir_path" ]] || return 0
   rmdir "$dir_path" 2>/dev/null || true
+}
+
+resolve_playwright_bundled_cli() {
+  local npm_root
+  local cli_js
+
+  require_cmd npm
+  require_cmd node
+  npm_root="$(npm root -g)"
+  cli_js="$npm_root/@playwright/cli/node_modules/playwright/cli.js"
+  [[ -f "$cli_js" ]] || return 1
+  printf '%s\n' "$cli_js"
+}
+
+ensure_sudo_session() {
+  require_cmd sudo
+  info "requesting sudo credentials for Playwright dependency installation"
+
+  if [[ -t 0 ]]; then
+    sudo -v
+  else
+    sudo -S -v
+  fi
+}
+
+install_playwright_artifacts() {
+  local bundled_cli
+
+  if ! bundled_cli="$(resolve_playwright_bundled_cli)"; then
+    die "Playwright bundled CLI not found after installing @playwright/cli"
+  fi
+
+  info "installing Playwright artifacts for current @playwright/cli installation"
+  node "$bundled_cli" install
+}
+
+install_playwright_deps() {
+  local bundled_cli
+  local current_node_cmd
+
+  if ! bundled_cli="$(resolve_playwright_bundled_cli)"; then
+    die "Playwright bundled CLI not found; run install first"
+  fi
+  current_node_cmd="$(command -v node)"
+  [[ -n "$current_node_cmd" ]] || die "missing command: node"
+
+  info "installing Playwright system dependencies"
+  ensure_sudo_session
+  sudo "$current_node_cmd" "$bundled_cli" install-deps
+}
+
+uninstall_playwright_artifacts() {
+  local bundled_cli
+
+  if ! bundled_cli="$(resolve_playwright_bundled_cli)"; then
+    warn "Playwright uninstall CLI not found, skip Playwright artifact cleanup"
+    return
+  fi
+
+  info "removing Playwright artifacts for current @playwright/cli installation"
+  node "$bundled_cli" uninstall
 }
 
 uninstall_named_target_skills() {
@@ -376,7 +483,7 @@ uninstall_target_skills() {
   done
 }
 
-action=""
+command_name=""
 scope="global"
 target=""
 version="latest"
@@ -387,8 +494,8 @@ skill_items=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    install|uninstall)
-      action="$1"
+    install|uninstall|install-deps|init|clean)
+      command_name="$1"
       shift
       ;;
     --scope)
@@ -425,16 +532,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$action" ]] || die "missing action: install or uninstall"
-validate_action "$action"
+[[ -n "$command_name" ]] || die "missing command: install, uninstall, install-deps, init, or clean"
+validate_command_name "$command_name"
 validate_scope "$scope"
 [[ -z "$target" ]] || validate_target "$target"
-resolve_selected_targets
 
-if [[ "$action" == "install" ]]; then
+if [[ "$command_name" == "install" ]]; then
   install_cli "@playwright/cli@$version"
+  install_playwright_artifacts
+elif [[ "$command_name" == "uninstall" ]]; then
+  uninstall_playwright_artifacts
+  uninstall_cli
+elif [[ "$command_name" == "install-deps" ]]; then
+  install_playwright_deps
+elif [[ "$command_name" == "init" ]]; then
+  resolve_selected_targets
+  resolve_playwright_cli_cmd || die "playwright-cli is not installed; run install first"
   run_skill_installer
 else
+  resolve_selected_targets
   uninstall_target_skills
-  uninstall_cli
+  uninstall_playwright_workspace
 fi
