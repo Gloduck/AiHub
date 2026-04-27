@@ -21,9 +21,8 @@ Optional inputs:
   --help             show this message
 
 Default behavior:
-  install installs @playwright/cli globally with npm, then installs default
-  Playwright artifacts for that installation using Playwright's default
-  browser-install behavior.
+  install installs @playwright/cli globally with npm, then installs the
+  Chromium browser artifact required by playwright-cli.
 
   uninstall removes Playwright artifacts for the current @playwright/cli
   installation when the bundled Playwright uninstall command is available, then
@@ -418,7 +417,7 @@ install_playwright_artifacts() {
   fi
 
   info "installing Playwright artifacts for current @playwright/cli installation"
-  node "$bundled_cli" install
+  node "$bundled_cli" install chromium
 }
 
 install_playwright_deps() {
