@@ -6,8 +6,8 @@
 
 # 环境变量
 
-+ 脚本名称[load_env.sh]：读取 env.ini 并加载到当前 shell 环境变量，默认读取脚本同目录或者当前工作目录下的env.ini。可选参数：`--file`、`--verbose`。示例：`source script/load_env.sh --file ./env.ini`
-+ 脚本名称[load_env.bat]：读取 env.ini 并加载到当前 cmd 环境变量，默认读取脚本同目录或者当前工作目录下的env.ini。可选参数：`--file`、`--verbose`。示例：`call script\load_env.bat --file .\env.ini`
++ 脚本名称[load_env.sh]：读取 env.ini 并加载到当前 shell 环境变量，默认读取脚本同目录或者当前工作目录下的env.ini，加载后打印已加载变量的 key。可选参数：`--file`、`--verbose`。示例：`source script/load_env.sh --file ./env.ini`
++ 脚本名称[load_env.bat]：读取 env.ini 并加载到当前 cmd 环境变量，默认读取脚本同目录或者当前工作目录下的env.ini，加载后打印已加载变量的 key。可选参数：`--file`、`--verbose`。示例：`call script\load_env.bat --file .\env.ini`
 
 # AI 请求
 

@@ -43,16 +43,22 @@ if not exist "%ENV_FILE%" (
 )
 
 if "%VERBOSE%"=="1" echo [DEBUG] loading env file: %ENV_FILE% 1>&2
+set "LOAD_KEYS="
 call :load_env_file
 if errorlevel 1 exit /b 1
 echo [INFO] loaded %LOAD_COUNT% variables from %ENV_FILE% 1>&2
+if defined LOAD_KEYS (
+  echo [INFO] loaded keys: %LOAD_KEYS% 1>&2
+) else (
+  echo [INFO] loaded keys: (none) 1>&2
+)
 exit /b 0
 
 :usage
 echo Usage: load_env.bat [--file PATH] [--verbose]
 echo.
 echo Purpose:
-echo   Load KEY=VALUE entries from env.ini into the current cmd environment.
+echo   Load KEY=VALUE entries from env.ini into the current cmd environment and print loaded keys.
 echo.
 echo Optional inputs:
 echo   --file     custom env.ini path
@@ -79,6 +85,7 @@ exit /b 0
 
 :load_env_file
 set "LOAD_COUNT=0"
+set "LOAD_KEYS="
 for /f "usebackq delims=" %%L in ("%ENV_FILE%") do (
   call :process_line "%%L"
   if errorlevel 1 exit /b 1
@@ -120,6 +127,11 @@ if errorlevel 1 (
 
 set "%KEY%=%VALUE%"
 set /a LOAD_COUNT+=1
+if defined LOAD_KEYS (
+  set "LOAD_KEYS=%LOAD_KEYS% %KEY%"
+) else (
+  set "LOAD_KEYS=%KEY%"
+)
 if "%VERBOSE%"=="1" echo [DEBUG] loaded %KEY% 1>&2
 set "KEY="
 set "VALUE="

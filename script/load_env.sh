@@ -9,7 +9,7 @@ usage() {
 Usage: source ${SCRIPT_NAME} [--file PATH] [--verbose]
 
 Purpose:
-  Load KEY=VALUE entries from env.ini into the current shell environment.
+  Load KEY=VALUE entries from env.ini into the current shell environment and print loaded keys.
 
 Optional inputs:
   --file     custom env.ini path
@@ -86,6 +86,7 @@ load_env_file() {
   local key
   local value
   local count=0
+  local loaded_keys=()
 
   [[ -f "$env_file" ]] || fail "env file not found: $env_file" || return 1
 
@@ -103,10 +104,16 @@ load_env_file() {
 
     export "$key=$value"
     debug "loaded $key"
+    loaded_keys+=("$key")
     count=$((count + 1))
   done <"$env_file"
 
   info "loaded $count variables from $env_file"
+  if [[ "$count" -gt 0 ]]; then
+    info "loaded keys: ${loaded_keys[*]}"
+  else
+    info "loaded keys: (none)"
+  fi
 }
 
 main() {
