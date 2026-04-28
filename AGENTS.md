@@ -15,5 +15,5 @@
 + 应先根据 `${AiHub Path}/script/script.md` 中的脚本用途、最小参数摘要和示例，选择最合适的脚本执行任务
 + 若 `${AiHub Path}/script/script.md` 已能明确脚本用途与参数，则不要先读源码
 + 阅读顺序应为：`${AiHub Path}/script/script.md` -> 脚本 `--help` -> 必要时再读脚本源码
-+ 正常情况下不允许直接读取 `env.ini` 文件获取环境变量；如需加载其中的环境变量，只能通过 `${AiHub Path}/script/load_env.sh` 或 `${AiHub Path}/script/load_env.bat` 完成，并且在加载环境变量后，也尽量不要打印获取环境变量的内容，避免泄露敏感信息。对于有些脚本，如果支持使用环境变量作为参数，也可以优先尝试通过这两个脚本来加载环境变量。
++ 不允许直接读取 `env.ini` 文件获取环境变量；如需加载其中的环境变量，只能通过 `${AiHub Path}/script/load_env.sh` 或 `${AiHub Path}/script/load_env.bat` 完成，并且在加载环境变量后，也不允许打印获取环境变量的内容，避免泄露敏感信息。对于有些脚本，如果支持使用环境变量作为参数，也可以优先尝试通过这两个脚本来加载环境变量。
 + 对需要 `source` 或 `call` 的脚本，执行时必须使用正确方式，不能用错误解释器直接运行
