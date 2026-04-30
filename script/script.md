@@ -4,6 +4,10 @@
 + 脚本名称[install_env.bat]：Windows 环境安装脚本，用于安装 node、maven、java、python、golang。必填参数：`--env`、`--version`、`--install-dir`。可选参数：`--arch`、`--config`、`--force`、`--no-profile`。示例：`script\install_env.bat --env golang --version 1.26.2 --install-dir D:\tools\golang`
 + 脚本名称[install_playwright_cli.sh]：管理 `@playwright/cli` 的全局安装与卸载、Playwright 系统依赖安装，以及按全局或项目 scope 初始化或清理 skills 和 `.playwright/` 工作区。必填参数：子命令 `install`、`uninstall`、`install-deps`、`init` 或 `clean`。可选参数：`--scope`、`--target`、`--version`、`--project-dir`、`--verbose`。示例：`script/install_playwright_cli.sh install-deps`
 
+# 脚本执行
+
++ 脚本名称[run_temp_script_with_deps.sh]：在临时目录中执行 Python 或 Node 脚本，并按需安装第三方依赖。必填参数：子命令 `python` 或 `node`、`--script`。可选参数：`--deps`、`--temp-dir`、`--auto-clean`、`--verbose`。示例：`script/run_temp_script_with_deps.sh python --script ./demo.py --deps "requests" --auto-clean`
+
 # 环境变量
 
 + 脚本名称[load_env.sh]：读取 env.ini 并加载到当前 shell 环境变量，默认读取脚本同目录或者当前工作目录下的env.ini，加载后打印已加载变量的 key。可选参数：`--file`、`--verbose`。示例：`source script/load_env.sh --file ./env.ini`
