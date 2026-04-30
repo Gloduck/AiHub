@@ -23,6 +23,8 @@
 
 + 如果用户想要一些SKILL处理一些特定的任务，可以在以下的网站进行检索：
   + https://mcpmarket.cn
+    + 搜索SKILL：https://mcpmarket.cn/skills/api/list?page={页数，从1开始}&per_page={每页大小}&search={关键词}&sort_by={stars/created_at}
+    + SKILL下载链接：https://mcpmarket.cn/skills/api/download/{skill_id}
 + 如果用户确定需要安装某个SKILL，你需要通过SKILL压缩包的下载地址来下载SKILL。然后确定当前使用的AI工具，是OpenCode、Claude或者其他的AI工具，并且找到对应的SKILL安装目录。然后询问用户安装方式，如下：
 
 ```
