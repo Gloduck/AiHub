@@ -17,16 +17,29 @@
 + 阅读顺序应为：`${AiHub Path}/script/script.md` -> 脚本 `--help` -> 必要时再读脚本源码
 + 不允许直接读取 `env.ini` 文件获取环境变量；如需加载其中的环境变量，只能通过 `${AiHub Path}/script/load_env.sh` 或 `${AiHub Path}/script/load_env.bat` 完成，并且在加载环境变量后，也不允许打印获取环境变量的内容，避免泄露敏感信息。对于有些脚本，如果支持使用环境变量作为参数，也可以优先尝试通过这两个脚本来加载环境变量。
 + 对需要 `source` 或 `call` 的脚本，执行时必须使用正确方式，不能用错误解释器直接运行
++ Python：执行涉及外部库的脚本时，使用 `pip-run` 临时安装依赖，用完即弃，无需手动清理
+
+```bash
+  pip install pip-run
+  pip-run script.py --deps pdfplumber,Pillow
+```
+
++ Node：执行涉及外部包的脚本时，使用 `npx` 临时执行，用完即弃
+  ```bash
+  npx some-package
+  ```
 
 ## SKILL探索
 
 + 如果用户想要一些SKILL处理一些特定的任务，可以在以下的网站进行检索：
   + https://mcpmarket.cn
 + 如果用户确定需要安装某个SKILL，你需要通过SKILL压缩包的下载地址来下载SKILL。然后确定当前使用的AI工具，是OpenCode、Claude或者其他的AI工具，并且找到对应的SKILL安装目录。然后询问用户安装方式，如下：
+
 ```
 全局安装：全局安装路径
 项目安装：项目安装路径
 ```
+
 + 在执行完成安装过后，需要删除下载的压缩包
 
 ## 特殊任务处理
