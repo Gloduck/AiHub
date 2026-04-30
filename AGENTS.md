@@ -17,3 +17,12 @@
 + 阅读顺序应为：`${AiHub Path}/script/script.md` -> 脚本 `--help` -> 必要时再读脚本源码
 + 不允许直接读取 `env.ini` 文件获取环境变量；如需加载其中的环境变量，只能通过 `${AiHub Path}/script/load_env.sh` 或 `${AiHub Path}/script/load_env.bat` 完成，并且在加载环境变量后，也不允许打印获取环境变量的内容，避免泄露敏感信息。对于有些脚本，如果支持使用环境变量作为参数，也可以优先尝试通过这两个脚本来加载环境变量。
 + 对需要 `source` 或 `call` 的脚本，执行时必须使用正确方式，不能用错误解释器直接运行
+
+## 特殊任务处理
++ 图片相关任务：如果用户命令中包含图片相关的指令，而当前的模型不支持，则尝试调用 `${AiHub Path}/script/request_thirdparty_ai_platform.sh`，请求三方AI平台模型来完成对应的任务，可以优先通过models子命令来确定三方AI平台是否支持能完成对应任务的模型。
+    + 图片生成：图片生成需添加`--raw-response`返回原始响应
+        + 模型：gpt-image-2
+    + 图片分析：
+        + 模型：gpt-5.5（复杂图片分析）, gpt-5.4-mini（简单图片分析）
++ 复杂任务：如果用户命令中包含很多复杂的任务逻辑，并且当前模型反复处理效果不好，则尝试调用 `${AiHub Path}/script/request_thirdparty_ai_platform.sh`，请求三方AI平台模型来完成复杂任务。如：修改Bug用户已经反复提醒了很多次了，仍然修改不好；用户自己提出切换复杂模型来处理任务
+    + 模型：gpt-5.5, claude-opus-4-7, gemini-3-pro-preview
