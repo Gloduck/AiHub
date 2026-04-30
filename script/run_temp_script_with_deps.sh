@@ -21,8 +21,8 @@ SOURCE_FILE_PATH=""
 usage() {
   cat <<EOF
 Usage:
-  script/${SCRIPT_NAME} python --script FILE_OR_TEXT [--deps "PKG..."] [--temp-dir PATH] [--auto-clean] [--verbose]
-  script/${SCRIPT_NAME} node --script FILE_OR_TEXT [--deps "PKG..."] [--temp-dir PATH] [--auto-clean] [--verbose]
+  script/${SCRIPT_NAME} python --script FILE_OR_TEXT [--deps "PKG..."] [--dir PATH] [--auto-clean] [--verbose]
+  script/${SCRIPT_NAME} node --script FILE_OR_TEXT [--deps "PKG..."] [--dir PATH] [--auto-clean] [--verbose]
 
 Purpose:
   Run a Python or Node script in a temporary working directory and optionally
@@ -34,15 +34,15 @@ Required inputs:
 
 Optional inputs:
   --deps "PKG..."     space-separated dependency list, same option name for both languages
-  --temp-dir PATH     explicit temporary directory path
+  --dir PATH          explicit temporary directory path
   --auto-clean        delete the temporary directory after execution
   --verbose           print debug logs
   --help              show this message
 
 Default behavior:
-  - When --temp-dir is omitted and --script points to an existing file, create
+  - When --dir is omitted and --script points to an existing file, create
     a random temp directory beside that source file.
-  - When --temp-dir is omitted and --script is inline text, create a random
+  - When --dir is omitted and --script is inline text, create a random
     temp directory under the current working directory.
   - Default is to keep the temporary directory after execution.
 
@@ -199,9 +199,9 @@ parse_args() {
         [[ $# -gt 0 ]] || die "missing value for --deps"
         DEPS="$1"
         ;;
-      --temp-dir)
+      --dir)
         shift
-        [[ $# -gt 0 ]] || die "missing value for --temp-dir"
+        [[ $# -gt 0 ]] || die "missing value for --dir"
         TEMP_DIR_INPUT="$1"
         ;;
       --auto-clean)

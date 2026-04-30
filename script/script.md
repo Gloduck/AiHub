@@ -6,7 +6,7 @@
 
 # 脚本执行
 
-+ 脚本名称[run_temp_script_with_deps.sh]：在临时目录中执行 Python 或 Node 脚本，并按需安装第三方依赖。必填参数：子命令 `python` 或 `node`、`--script`。可选参数：`--deps`、`--temp-dir`、`--auto-clean`、`--verbose`。示例：`script/run_temp_script_with_deps.sh python --script ./demo.py --deps "requests" --auto-clean`
++ 脚本名称[run_temp_script_with_deps.sh]：在临时目录中执行 Python 或 Node 脚本，并按需安装第三方依赖。必填参数：子命令 `python` 或 `node`、`--script`。可选参数：`--deps`、`--dir`、`--auto-clean`、`--verbose`。示例：`script/run_temp_script_with_deps.sh python --script ./demo.py --deps "requests" --auto-clean`
 
 # 环境变量
 
