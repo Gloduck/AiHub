@@ -17,6 +17,12 @@ BASE_URL=""
 API_KEY=""
 MAX_TOKENS=""
 TEMPERATURE=""
+IMAGE_SIZE=""
+IMAGE_BACKGROUND=""
+IMAGE_QUALITY=""
+IMAGE_OUTPUT_FORMAT=""
+MASK_IMAGE_PATH=""
+GENERATED_IMAGE_PATH=""
 DECLARE_RESPONSE_PATH=""
 RAW_RESPONSE=0
 DRY_RUN=0
@@ -29,6 +35,7 @@ usage() {
   cat <<EOF
 Usage:
   script/${SCRIPT_NAME} message PROMPT --model MODEL [options]
+  script/${SCRIPT_NAME} image PROMPT --model MODEL [options]
   script/${SCRIPT_NAME} models [options]
   script/${SCRIPT_NAME} --format openai|claude (--model MODEL [options] | --list-models [options])
 
@@ -38,19 +45,26 @@ Purpose:
 
 Required inputs:
   message          send one prompt request
+  image            generate one image, or edit a local image with the upstream API
   models           fetch available models from the upstream /v1/models endpoint
   --format         request format: openai or claude; when omitted, infer from env
-  --model          model name passed to the upstream API; required for message
+  --model          model name passed to the upstream API; required for message and image
 
 Operation:
   --list-models    legacy alias for models
 
 Prompt inputs:
-  PROMPT               first positional argument after message
-                      required with message
+  PROMPT               first positional argument after message or image
+                      required with message and image
 
 Optional inputs:
-  --image PATH         attach an image; may be provided multiple times
+  --image PATH         attach an image for message, or provide one or more source images for image editing
+  --mask PATH          optional mask image for OpenAI image editing
+  --size VALUE         image size for image generation, for example 1024x1024
+  --background VALUE   image background option passed through for image generation
+  --quality VALUE      image quality option passed through for image generation
+  --output-format VAL  output format option passed through for image generation
+  --image-output PATH  decode the first generated image and write it to a file
   --base-url URL       upstream base URL only; path is appended automatically
   --api-key KEY        API key; defaults to environment variables
   --max-tokens N       max output tokens
@@ -74,11 +88,13 @@ Format inference when --format is omitted:
   4. If only THIRDPARTY_AI_PLATFORM_BASE_URL is set, provide --format or THIRDPARTY_AI_PLATFORM_FORMAT
 
 Default endpoints appended to --base-url:
-  openai -> /v1/chat/completions, or /v1/models with models
-  claude -> /v1/messages, or /v1/models with models
+  openai -> /v1/chat/completions with message, /v1/images/generations with image, /v1/images/edits with image --image, or /v1/models with models
+  claude -> /v1/messages with message, or /v1/models with models
 
 Notes:
   - Images are embedded as base64 in the official provider-specific payload shape.
+  - The image subcommand currently supports only OpenAI format because Claude's official API does not expose image generation or image editing.
+  - When image is used with one or more --image values, the OpenAI multipart image editing endpoint is used.
   - If you store values in env.ini, load them first with: source script/load_env.sh
   - Side effect: sends an HTTP request unless --dry-run is used.
   - Normal output prints AI text, or newline-separated model IDs with models, unless --raw-response is used.
@@ -148,7 +164,7 @@ cleanup_temp_files() {
 }
 
 read_prompt() {
-  [[ -n "$PROMPT" ]] || die "missing prompt: use message \"...\""
+  [[ -n "$PROMPT" ]] || die "missing prompt"
   printf '%s' "$PROMPT"
 }
 
@@ -274,33 +290,9 @@ build_claude_content() {
   printf '%s\n' "$content_file"
 }
 
-build_payload() {
-  local prompt_text="$1"
-  local content_file
-  local payload_file
+apply_message_payload_options() {
+  local payload_file="$1"
   local next_payload_file
-
-  case "$FORMAT" in
-    openai)
-      content_file="$(build_openai_content "$prompt_text")"
-      payload_file="$(make_temp_file)"
-      jq -n \
-        --arg model "$MODEL" \
-        --rawfile content_raw "$content_file" \
-        '{model:$model, messages:[{role:"user", content:($content_raw | fromjson)}]}' >"$payload_file"
-      ;;
-    claude)
-      content_file="$(build_claude_content "$prompt_text")"
-      payload_file="$(make_temp_file)"
-      jq -n \
-        --arg model "$MODEL" \
-        --rawfile content_raw "$content_file" \
-        '{model:$model, messages:[{role:"user", content:($content_raw | fromjson)}]}' >"$payload_file"
-      ;;
-    *)
-      die "unsupported format: $FORMAT"
-      ;;
-  esac
 
   if [[ -n "$MAX_TOKENS" ]]; then
     next_payload_file="$(make_temp_file)"
@@ -321,23 +313,204 @@ build_payload() {
   printf '%s\n' "$payload_file"
 }
 
+apply_openai_image_payload_options() {
+  local payload_file="$1"
+  local next_payload_file
+
+  if [[ -n "$IMAGE_SIZE" ]]; then
+    next_payload_file="$(make_temp_file)"
+    jq -n --rawfile payload_raw "$payload_file" --arg size "$IMAGE_SIZE" '($payload_raw | fromjson) + {size:$size}' >"$next_payload_file"
+    payload_file="$next_payload_file"
+  fi
+
+  if [[ -n "$IMAGE_BACKGROUND" ]]; then
+    next_payload_file="$(make_temp_file)"
+    jq -n --rawfile payload_raw "$payload_file" --arg background "$IMAGE_BACKGROUND" '($payload_raw | fromjson) + {background:$background}' >"$next_payload_file"
+    payload_file="$next_payload_file"
+  fi
+
+  if [[ -n "$IMAGE_QUALITY" ]]; then
+    next_payload_file="$(make_temp_file)"
+    jq -n --rawfile payload_raw "$payload_file" --arg quality "$IMAGE_QUALITY" '($payload_raw | fromjson) + {quality:$quality}' >"$next_payload_file"
+    payload_file="$next_payload_file"
+  fi
+
+  if [[ -n "$IMAGE_OUTPUT_FORMAT" ]]; then
+    next_payload_file="$(make_temp_file)"
+    jq -n --rawfile payload_raw "$payload_file" --arg output_format "$IMAGE_OUTPUT_FORMAT" '($payload_raw | fromjson) + {output_format:$output_format}' >"$next_payload_file"
+    payload_file="$next_payload_file"
+  fi
+
+  printf '%s\n' "$payload_file"
+}
+
+build_openai_message_payload() {
+  local prompt_text="$1"
+  local content_file
+  local payload_file
+
+  content_file="$(build_openai_content "$prompt_text")"
+  payload_file="$(make_temp_file)"
+  jq -n \
+    --arg model "$MODEL" \
+    --rawfile content_raw "$content_file" \
+    '{model:$model, messages:[{role:"user", content:($content_raw | fromjson)}]}' >"$payload_file"
+
+  apply_message_payload_options "$payload_file"
+}
+
+build_claude_message_payload() {
+  local prompt_text="$1"
+  local content_file
+  local payload_file
+
+  content_file="$(build_claude_content "$prompt_text")"
+  payload_file="$(make_temp_file)"
+  jq -n \
+    --arg model "$MODEL" \
+    --rawfile content_raw "$content_file" \
+    '{model:$model, messages:[{role:"user", content:($content_raw | fromjson)}]}' >"$payload_file"
+
+  apply_message_payload_options "$payload_file"
+}
+
+build_openai_image_payload() {
+  local prompt_text="$1"
+  local payload_file
+  local next_payload_file
+  local images_file
+
+  if [[ ${#IMAGE_PATHS[@]} -gt 0 ]]; then
+    payload_file="$(make_temp_file)"
+    images_file="$(make_temp_file)"
+    printf '%s\n' "${IMAGE_PATHS[@]}" | jq -R . | jq -s . >"$images_file"
+    jq -n \
+      --arg model "$MODEL" \
+      --arg prompt "$prompt_text" \
+      --rawfile images_raw "$images_file" \
+      '{model:$model, prompt:$prompt, images:($images_raw | fromjson), request_format:"multipart/form-data"}' >"$payload_file"
+
+    if [[ -n "$MASK_IMAGE_PATH" ]]; then
+      next_payload_file="$(make_temp_file)"
+      jq -n --rawfile payload_raw "$payload_file" --arg mask "$MASK_IMAGE_PATH" '($payload_raw | fromjson) + {mask:$mask}' >"$next_payload_file"
+      payload_file="$next_payload_file"
+    fi
+  else
+    payload_file="$(make_temp_file)"
+    jq -n \
+      --arg model "$MODEL" \
+      --arg prompt "$prompt_text" \
+      '{model:$model, prompt:$prompt}' >"$payload_file"
+  fi
+
+  apply_openai_image_payload_options "$payload_file"
+}
+
+build_claude_image_payload() {
+  die "Claude official API does not provide an image generation or image editing endpoint"
+}
+
+build_openai_message_endpoint() {
+  local resolved_base_url="$1"
+  printf '%s/v1/chat/completions\n' "$resolved_base_url"
+}
+
+build_claude_message_endpoint() {
+  local resolved_base_url="$1"
+  printf '%s/v1/messages\n' "$resolved_base_url"
+}
+
+build_openai_image_endpoint() {
+  local resolved_base_url="$1"
+
+  if [[ ${#IMAGE_PATHS[@]} -gt 0 ]]; then
+    printf '%s/v1/images/edits\n' "$resolved_base_url"
+  else
+    printf '%s/v1/images/generations\n' "$resolved_base_url"
+  fi
+}
+
+build_claude_image_endpoint() {
+  die "Claude official API does not provide an image generation or image editing endpoint"
+}
+
+build_payload() {
+  local prompt_text="$1"
+  local payload_file
+
+  case "$SUBCOMMAND" in
+    message)
+      case "$FORMAT" in
+        openai)
+          payload_file="$(build_openai_message_payload "$prompt_text")"
+          ;;
+        claude)
+          payload_file="$(build_claude_message_payload "$prompt_text")"
+          ;;
+        *)
+          die "unsupported format: $FORMAT"
+          ;;
+      esac
+      ;;
+    image)
+      case "$FORMAT" in
+        openai)
+          payload_file="$(build_openai_image_payload "$prompt_text")"
+          ;;
+        claude)
+          payload_file="$(build_claude_image_payload)"
+          ;;
+        *)
+          die "unsupported format: $FORMAT"
+          ;;
+      esac
+      ;;
+    models)
+      die "models does not build a request payload"
+      ;;
+    *)
+      die "unsupported subcommand: $SUBCOMMAND"
+      ;;
+  esac
+
+  printf '%s\n' "$payload_file"
+}
+
 build_endpoint() {
   local resolved_base_url="$1"
 
-  if [[ "$LIST_MODELS" == "1" ]]; then
-    printf '%s/v1/models\n' "$resolved_base_url"
-    return
-  fi
-
-  case "$FORMAT" in
-    openai)
-      printf '%s/v1/chat/completions\n' "$resolved_base_url"
+  case "$SUBCOMMAND" in
+    models)
+      printf '%s/v1/models\n' "$resolved_base_url"
       ;;
-    claude)
-      printf '%s/v1/messages\n' "$resolved_base_url"
+    message)
+      case "$FORMAT" in
+        openai)
+          build_openai_message_endpoint "$resolved_base_url"
+          ;;
+        claude)
+          build_claude_message_endpoint "$resolved_base_url"
+          ;;
+        *)
+          die "unsupported format: $FORMAT"
+          ;;
+      esac
+      ;;
+    image)
+      case "$FORMAT" in
+        openai)
+          build_openai_image_endpoint "$resolved_base_url"
+          ;;
+        claude)
+          build_claude_image_endpoint
+          ;;
+        *)
+          die "unsupported format: $FORMAT"
+          ;;
+      esac
       ;;
     *)
-      die "unsupported format: $FORMAT"
+      die "unsupported subcommand: $SUBCOMMAND"
       ;;
   esac
 }
@@ -386,11 +559,43 @@ extract_models_list() {
   ' <<<"$response_body"
 }
 
+extract_generated_image_value() {
+  local response_body="$1"
+
+  jq -er '.data[0].b64_json // .data[0].url' <<<"$response_body"
+}
+
+write_generated_image() {
+  local response_body="$1"
+  local image_path="$2"
+  local image_b64
+  local image_url
+
+  ensure_parent_dir "$image_path"
+
+  image_b64="$(jq -er '.data[0].b64_json // empty' <<<"$response_body")" || true
+  if [[ -n "$image_b64" ]]; then
+    printf '%s' "$image_b64" | base64 -d >"$image_path"
+    printf '%s\n' "$image_path"
+    return
+  fi
+
+  image_url="$(jq -er '.data[0].url // empty' <<<"$response_body")" || true
+  if [[ -n "$image_url" ]]; then
+    curl --silent --show-error --fail --output "$image_path" "$image_url"
+    printf '%s\n' "$image_path"
+    return
+  fi
+
+  die "no generated image found in response"
+}
+
 send_request() {
   local endpoint="$1"
   local resolved_api_key="$2"
   local payload_file="$3"
   local -a curl_args=()
+  local -a form_args=()
   local request_method="POST"
   local response_body
   local response_text
@@ -398,9 +603,10 @@ send_request() {
 
   case "$FORMAT" in
     openai)
-      mapfile -t curl_args < <(printf '%s\n' \
-        -H "Authorization: Bearer $resolved_api_key" \
-        -H "Content-Type: application/json")
+      mapfile -t curl_args < <(printf '%s\n' -H "Authorization: Bearer $resolved_api_key")
+      if [[ "$SUBCOMMAND" != "image" || ${#IMAGE_PATHS[@]} -eq 0 ]]; then
+        curl_args+=(-H "Content-Type: application/json")
+      fi
       ;;
     claude)
       mapfile -t curl_args < <(printf '%s\n' \
@@ -413,25 +619,77 @@ send_request() {
       ;;
   esac
 
-  if [[ "$LIST_MODELS" == "1" ]]; then
-    request_method="GET"
-  fi
+  case "$SUBCOMMAND" in
+    models)
+      request_method="GET"
+      ;;
+    message|image)
+      ;;
+    *)
+      die "unsupported subcommand: $SUBCOMMAND"
+      ;;
+  esac
 
   debug "sending request to $endpoint"
-  if [[ "$LIST_MODELS" == "1" ]]; then
-    response_body="$(curl --silent --show-error --fail-with-body -X "$request_method" "$endpoint" "${curl_args[@]}")"
-  else
-    response_body="$(curl --silent --show-error --fail-with-body -X "$request_method" "$endpoint" "${curl_args[@]}" --data-binary "@$payload_file")"
-  fi
+  case "$SUBCOMMAND" in
+    models)
+      response_body="$(curl --silent --show-error --fail-with-body -X "$request_method" "$endpoint" "${curl_args[@]}")"
+      ;;
+    message|image)
+      if [[ "$SUBCOMMAND" == "image" && ${#IMAGE_PATHS[@]} -gt 0 ]]; then
+        form_args=(-F "model=$MODEL" -F "prompt=$PROMPT")
+        local image_path
+        for image_path in "${IMAGE_PATHS[@]}"; do
+          form_args+=(-F "image=@$image_path")
+        done
+        if [[ -n "$MASK_IMAGE_PATH" ]]; then
+          form_args+=(-F "mask=@$MASK_IMAGE_PATH")
+        fi
+        if [[ -n "$IMAGE_SIZE" ]]; then
+          form_args+=(-F "size=$IMAGE_SIZE")
+        fi
+        if [[ -n "$IMAGE_BACKGROUND" ]]; then
+          form_args+=(-F "background=$IMAGE_BACKGROUND")
+        fi
+        if [[ -n "$IMAGE_QUALITY" ]]; then
+          form_args+=(-F "quality=$IMAGE_QUALITY")
+        fi
+        if [[ -n "$IMAGE_OUTPUT_FORMAT" ]]; then
+          form_args+=(-F "output_format=$IMAGE_OUTPUT_FORMAT")
+        fi
+        response_body="$(curl --silent --show-error --fail-with-body -X "$request_method" "$endpoint" "${curl_args[@]}" "${form_args[@]}")"
+      else
+        response_body="$(curl --silent --show-error --fail-with-body -X "$request_method" "$endpoint" "${curl_args[@]}" --data-binary "@$payload_file")"
+      fi
+      ;;
+    *)
+      die "unsupported subcommand: $SUBCOMMAND"
+      ;;
+  esac
 
   if [[ "$RAW_RESPONSE" == "1" ]]; then
     output_value="$response_body"
-  elif [[ "$LIST_MODELS" == "1" ]]; then
-    response_text="$(extract_models_list "$response_body")"
-    output_value="$response_text"
   else
-    response_text="$(extract_response_text "$response_body")"
-    output_value="$response_text"
+    case "$SUBCOMMAND" in
+      models)
+        response_text="$(extract_models_list "$response_body")"
+        output_value="$response_text"
+        ;;
+      message)
+        response_text="$(extract_response_text "$response_body")"
+        output_value="$response_text"
+        ;;
+      image)
+        if [[ -n "$GENERATED_IMAGE_PATH" ]]; then
+          output_value="$(write_generated_image "$response_body" "$GENERATED_IMAGE_PATH")"
+        else
+          output_value="$(extract_generated_image_value "$response_body")"
+        fi
+        ;;
+      *)
+        die "unsupported subcommand: $SUBCOMMAND"
+        ;;
+    esac
   fi
 
   write_output "$output_value"
@@ -442,6 +700,10 @@ parse_args() {
     case "$1" in
       message)
         SUBCOMMAND="message"
+        shift
+        ;;
+      image)
+        SUBCOMMAND="image"
         shift
         ;;
       models)
@@ -468,6 +730,36 @@ parse_args() {
       --image)
         [[ $# -ge 2 ]] || die "--image requires a value"
         IMAGE_PATHS+=("$(resolve_from_cwd "$2")")
+        shift 2
+        ;;
+      --mask)
+        [[ $# -ge 2 ]] || die "--mask requires a value"
+        MASK_IMAGE_PATH="$(resolve_from_cwd "$2")"
+        shift 2
+        ;;
+      --size)
+        [[ $# -ge 2 ]] || die "--size requires a value"
+        IMAGE_SIZE="$2"
+        shift 2
+        ;;
+      --background)
+        [[ $# -ge 2 ]] || die "--background requires a value"
+        IMAGE_BACKGROUND="$2"
+        shift 2
+        ;;
+      --quality)
+        [[ $# -ge 2 ]] || die "--quality requires a value"
+        IMAGE_QUALITY="$2"
+        shift 2
+        ;;
+      --output-format)
+        [[ $# -ge 2 ]] || die "--output-format requires a value"
+        IMAGE_OUTPUT_FORMAT="$2"
+        shift 2
+        ;;
+      --image-output)
+        [[ $# -ge 2 ]] || die "--image-output requires a value"
+        GENERATED_IMAGE_PATH="$(resolve_from_cwd "$2")"
         shift 2
         ;;
       --base-url)
@@ -516,11 +808,22 @@ parse_args() {
         exit 0
         ;;
       *)
-        if [[ "$SUBCOMMAND" == "message" && -z "$PROMPT" ]]; then
-          PROMPT="$1"
-          shift
-          continue
-        fi
+        case "$SUBCOMMAND" in
+          message|image)
+            if [[ -z "$PROMPT" ]]; then
+              PROMPT="$1"
+              shift
+              continue
+            fi
+            ;;
+          models)
+            ;;
+          "")
+            ;;
+          *)
+            die "unsupported subcommand: $SUBCOMMAND"
+            ;;
+        esac
         die "unknown argument: $1"
         ;;
     esac
@@ -537,20 +840,44 @@ parse_args() {
     fi
   fi
 
-  if [[ "$SUBCOMMAND" == "message" && "$LIST_MODELS" == "1" ]]; then
-    die "message cannot be used with --list-models"
-  fi
-
-  if [[ "$LIST_MODELS" == "1" ]]; then
-    [[ -z "$MODEL" ]] || die "--model cannot be used with --list-models"
-    [[ -z "$PROMPT" ]] || die "PROMPT cannot be used with --list-models"
-    [[ ${#IMAGE_PATHS[@]} -eq 0 ]] || die "--image cannot be used with --list-models"
-    [[ -z "$MAX_TOKENS" ]] || die "--max-tokens cannot be used with --list-models"
-    [[ -z "$TEMPERATURE" ]] || die "--temperature cannot be used with --list-models"
-    return
-  fi
-
-  [[ -n "$MODEL" ]] || die "missing required argument: --model"
+  case "$SUBCOMMAND" in
+    models)
+      [[ "$LIST_MODELS" == "1" ]] || die "models subcommand requires model listing mode"
+      [[ -z "$MODEL" ]] || die "--model cannot be used with --list-models"
+      [[ -z "$PROMPT" ]] || die "PROMPT cannot be used with --list-models"
+      [[ ${#IMAGE_PATHS[@]} -eq 0 ]] || die "--image cannot be used with --list-models"
+      [[ -z "$IMAGE_SIZE" ]] || die "--size cannot be used with --list-models"
+      [[ -z "$IMAGE_BACKGROUND" ]] || die "--background cannot be used with --list-models"
+      [[ -z "$IMAGE_QUALITY" ]] || die "--quality cannot be used with --list-models"
+      [[ -z "$IMAGE_OUTPUT_FORMAT" ]] || die "--output-format cannot be used with --list-models"
+      [[ -z "$MASK_IMAGE_PATH" ]] || die "--mask cannot be used with --list-models"
+      [[ -z "$GENERATED_IMAGE_PATH" ]] || die "--image-output cannot be used with --list-models"
+      [[ -z "$MAX_TOKENS" ]] || die "--max-tokens cannot be used with --list-models"
+      [[ -z "$TEMPERATURE" ]] || die "--temperature cannot be used with --list-models"
+      return
+      ;;
+    message)
+      [[ "$LIST_MODELS" != "1" ]] || die "message cannot be used with --list-models"
+      [[ -n "$MODEL" ]] || die "missing required argument: --model"
+      [[ -n "$PROMPT" ]] || die "missing prompt: use message \"...\""
+      ;;
+    image)
+      [[ "$LIST_MODELS" != "1" ]] || die "image cannot be used with --list-models"
+      [[ -n "$MODEL" ]] || die "missing required argument: --model"
+      [[ -n "$PROMPT" ]] || die "missing prompt: use image \"...\""
+      [[ -z "$MAX_TOKENS" ]] || die "--max-tokens is not supported with image generation"
+      [[ -z "$TEMPERATURE" ]] || die "--temperature is not supported with image generation"
+      if [[ -n "$MASK_IMAGE_PATH" && ${#IMAGE_PATHS[@]} -eq 0 ]]; then
+        die "--mask requires --image"
+      fi
+      if [[ -n "$MASK_IMAGE_PATH" ]]; then
+        [[ -f "$MASK_IMAGE_PATH" ]] || die "mask image file not found: $MASK_IMAGE_PATH"
+      fi
+      ;;
+    *)
+      die "unsupported subcommand: $SUBCOMMAND"
+      ;;
+  esac
 
   if [[ -n "$MAX_TOKENS" && ! "$MAX_TOKENS" =~ ^[0-9]+$ ]]; then
     die "--max-tokens must be an integer"
@@ -575,25 +902,57 @@ main() {
 
   require_cmd curl
   require_cmd jq
-  if [[ "$LIST_MODELS" != "1" && ${#IMAGE_PATHS[@]} -gt 0 ]]; then
-    require_cmd base64
-  fi
+  case "$SUBCOMMAND" in
+    models)
+      ;;
+    message)
+      if [[ ${#IMAGE_PATHS[@]} -gt 0 ]]; then
+        require_cmd base64
+      fi
+      ;;
+    image)
+      local image_path
+      for image_path in "${IMAGE_PATHS[@]}"; do
+        [[ -f "$image_path" ]] || die "image file not found: $image_path"
+      done
+      if [[ -n "$GENERATED_IMAGE_PATH" ]]; then
+        require_cmd base64
+      fi
+      ;;
+    *)
+      die "unsupported subcommand: $SUBCOMMAND"
+      ;;
+  esac
 
   resolved_base_url="$(resolve_base_url)"
   endpoint="$(build_endpoint "$resolved_base_url")"
 
-  if [[ "$LIST_MODELS" != "1" ]]; then
-    prompt_text="$(read_prompt)"
-    payload_file="$(build_payload "$prompt_text")"
-  fi
+  case "$SUBCOMMAND" in
+    models)
+      ;;
+    message|image)
+      prompt_text="$(read_prompt)"
+      payload_file="$(build_payload "$prompt_text")"
+      ;;
+    *)
+      die "unsupported subcommand: $SUBCOMMAND"
+      ;;
+  esac
 
   if [[ "$DRY_RUN" == "1" ]]; then
     printf 'format=%s\n' "$FORMAT"
     printf 'mode=%s\n' "$SUBCOMMAND"
     printf 'endpoint=%s\n' "$endpoint"
-    if [[ "$LIST_MODELS" != "1" ]]; then
-      jq . "$payload_file"
-    fi
+    case "$SUBCOMMAND" in
+      models)
+        ;;
+      message|image)
+        jq . "$payload_file"
+        ;;
+      *)
+        die "unsupported subcommand: $SUBCOMMAND"
+        ;;
+    esac
     return 0
   fi
 
