@@ -14,17 +14,19 @@ SCRIPT_VERBOSE=0
 selected_site=""
 expire_value=""
 expire_seconds=""
+output_format="text"
+raw_response=0
 declare -a input_files=()
 
 print_help() {
   cat <<'EOF'
 Usage:
-  script/upload_images_to_image_server.sh [--site postimages|imgbb] [--expire VALUE] [--verbose] FILE...
+  script/upload_images_to_image_server.sh [--site postimages|imgbb] [--expire VALUE] [--raw-response] [--verbose] FILE...
 
 Purpose:
-  Upload one or more local image files to Postimages or ImgBB and print the direct image URL for
-  each file on stdout. When --site is omitted, the script tries ImgBB first and then Postimages
-  for each file until one succeeds.
+  Upload one or more local image files to Postimages or ImgBB and print the image name,
+  original_url, and display_url for each file on stdout. When --site is omitted, the script
+  tries ImgBB first and then Postimages for each file until one succeeds.
 
 Required inputs:
   FILE...                  one or more local image file paths
@@ -32,12 +34,14 @@ Required inputs:
 Optional inputs:
   --site NAME              upload backend: postimages or imgbb
   --expire VALUE           auto-delete time like 300s, 30m, 1d; omitted means no expiration
+  --raw-response           output JSON instead of text blocks
   --verbose                print debug logs to stderr
   --help                   show this message
 
 Default behavior:
   - Without --site, the script tries backends in this order: imgbb, postimages.
-  - Stdout prints one direct image URL per input file, in the same order as the input files.
+  - Stdout prints one result block per input file, in the same order as the input files.
+  - With --raw-response, stdout prints a JSON array of result objects instead.
   - Stderr is used only for logs and errors.
 
 Expiration notes:
@@ -49,7 +53,7 @@ Expiration notes:
 
 Side effects:
   - Sends HTTP upload requests to the selected image host.
-  - Uploaded images become publicly reachable through the returned direct URLs.
+  - Uploaded images become publicly reachable through the returned original_url and display_url.
 
 Platform notes:
   - Designed for Linux shell and Git Bash.
@@ -68,6 +72,10 @@ parse_args() {
         [[ $# -ge 2 ]] || die "missing value for --expire"
         expire_value="$2"
         shift 2
+        ;;
+      --raw-response)
+        raw_response=1
+        shift
         ;;
       --verbose)
         SCRIPT_VERBOSE=1
@@ -112,6 +120,7 @@ parse_expire_to_seconds() {
 
   if [[ -z "$raw_value" ]]; then
     expire_seconds=0
+    printf '%s\n' "$expire_seconds"
     return
   fi
 
@@ -180,7 +189,17 @@ extract_json_string_field() {
   unescape_json_slashes "$value"
 }
 
-extract_postimages_direct_url() {
+extract_json_string_with_pattern() {
+  local json_text="$1"
+  local sed_pattern="$2"
+  local value
+
+  value="$(printf '%s\n' "$json_text" | sed -n "$sed_pattern" | head -n 1)"
+  [[ -n "$value" ]] || return 1
+  unescape_json_slashes "$value"
+}
+
+extract_postimages_original_url() {
   local page_html="$1"
   local value
 
@@ -193,6 +212,89 @@ extract_postimages_direct_url() {
   value="$(printf '%s\n' "$page_html" | tr '\n' ' ' | sed -n 's/.*<meta[^>]*property="og:image"[^>]*content="\([^"]*\)".*/\1/p' | head -n 1)"
   [[ -n "$value" ]] || return 1
   printf '%s\n' "$value"
+}
+
+extract_postimages_display_url() {
+  local page_html="$1"
+  local value
+
+  value="$(printf '%s\n' "$page_html" | tr '\n' ' ' | sed -n 's/.*class="card-img-top object-fit-cover"[^>]*src="\([^"]*\)".*/\1/p' | head -n 1)"
+  if [[ -n "$value" ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  value="$(printf '%s\n' "$page_html" | tr '\n' ' ' | sed -n 's/.*<img[^>]*src="\(https:\/\/i\.postimg\.cc\/[^"]*\)"[^>]*class="card-img-top object-fit-cover".*/\1/p' | head -n 1)"
+  [[ -n "$value" ]] || return 1
+  printf '%s\n' "$value"
+}
+
+json_escape() {
+  local value="$1"
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//$'\n'/\\n}
+  value=${value//$'\r'/\\r}
+  value=${value//$'\t'/\\t}
+  printf '%s' "$value"
+}
+
+build_result() {
+  local image_name="$1"
+  local original_url="$2"
+  local display_url="$3"
+
+  printf 'name=%s\noriginal_url=%s\ndisplay_url=%s\n' "$image_name" "$original_url" "$display_url"
+}
+
+extract_result_field() {
+  local result_text="$1"
+  local field_name="$2"
+
+  printf '%s\n' "$result_text" | sed -n "s/^$field_name=//p" | head -n 1
+}
+
+print_text_result() {
+  local result_text="$1"
+  local image_name
+  local original_url
+  local display_url
+
+  image_name="$(extract_result_field "$result_text" 'name')"
+  original_url="$(extract_result_field "$result_text" 'original_url')"
+  display_url="$(extract_result_field "$result_text" 'display_url')"
+
+  printf '%s\n' "$image_name"
+  printf 'original_url: %s\n' "$original_url"
+  printf 'display_url: %s\n' "$display_url"
+}
+
+print_json_results() {
+  local -n json_results_ref=$1
+  local index
+  local result_text
+  local image_name
+  local original_url
+  local display_url
+
+  printf '[\n'
+  for index in "${!json_results_ref[@]}"; do
+    result_text="${json_results_ref[$index]}"
+    image_name="$(extract_result_field "$result_text" 'name')"
+    original_url="$(extract_result_field "$result_text" 'original_url')"
+    display_url="$(extract_result_field "$result_text" 'display_url')"
+
+    printf '  {\n'
+    printf '    "name": "%s",\n' "$(json_escape "$image_name")"
+    printf '    "original_url": "%s",\n' "$(json_escape "$original_url")"
+    printf '    "display_url": "%s"\n' "$(json_escape "$display_url")"
+    if [[ "$index" -lt $((${#json_results_ref[@]} - 1)) ]]; then
+      printf '  },\n'
+    else
+      printf '  }\n'
+    fi
+  done
+  printf ']\n'
 }
 
 imgbb_auth_token=""
@@ -218,7 +320,9 @@ upload_to_imgbb() {
   local expiration_token=""
   local auth_token
   local response
-  local direct_url
+  local original_url
+  local display_url
+  local image_name
 
   expire_seconds_value="$(parse_expire_to_seconds "$expire_value")"
   if ! expiration_token="$(imgbb_expiration_from_seconds "$expire_seconds_value")"; then
@@ -257,17 +361,23 @@ upload_to_imgbb() {
     }
   fi
 
-  direct_url="$(extract_json_string_field "$response" 'display_url' 2>/dev/null || true)"
-  if [[ -z "$direct_url" ]]; then
-    direct_url="$(extract_json_string_field "$response" 'url' 2>/dev/null || true)"
+  image_name="$(basename "$file_path")"
+  original_url="$(extract_json_string_with_pattern "$response" 's/.*"image":{"filename":"[^"]*","name":"[^"]*","mime":"[^"]*","extension":"[^"]*","url":"\([^"]*\)".*/\1/p' 2>/dev/null || true)"
+  if [[ -z "$original_url" ]]; then
+    original_url="$(extract_json_string_field "$response" 'url' 2>/dev/null || true)"
   fi
 
-  [[ -n "$direct_url" ]] || {
-    warn "ImgBB response did not include a direct URL for $file_path"
+  display_url="$(extract_json_string_field "$response" 'display_url' 2>/dev/null || true)"
+  if [[ -z "$display_url" ]]; then
+    display_url="$original_url"
+  fi
+
+  [[ -n "$original_url" ]] || {
+    warn "ImgBB response did not include an original URL for $file_path"
     return 1
   }
 
-  printf '%s\n' "$direct_url"
+  build_result "$image_name" "$original_url" "$display_url"
 }
 
 upload_to_postimages() {
@@ -277,8 +387,10 @@ upload_to_postimages() {
   local response
   local detail_url
   local page_html
-  local direct_url
+  local original_url
+  local display_url
   local upload_session
+  local image_name
 
   expire_seconds_value="$(parse_expire_to_seconds "$expire_value")"
   upload_session="$(date +%s%3N).${RANDOM}${RANDOM}"
@@ -318,13 +430,19 @@ upload_to_postimages() {
     return 1
   }
 
-  direct_url="$(extract_postimages_direct_url "$page_html" 2>/dev/null || true)"
-  [[ -n "$direct_url" ]] || {
-    warn "failed to extract Postimages direct URL for $file_path"
+  image_name="$(basename "$file_path")"
+  original_url="$(extract_postimages_original_url "$page_html" 2>/dev/null || true)"
+  [[ -n "$original_url" ]] || {
+    warn "failed to extract Postimages original URL for $file_path"
     return 1
   }
 
-  printf '%s\n' "$direct_url"
+  display_url="$(extract_postimages_display_url "$page_html" 2>/dev/null || true)"
+  if [[ -z "$display_url" ]]; then
+    display_url="$original_url"
+  fi
+
+  build_result "$image_name" "$original_url" "$display_url"
 }
 
 resolve_input_files() {
@@ -356,26 +474,26 @@ candidate_sites_for_file() {
 upload_one_file() {
   local file_path="$1"
   local site_name
-  local direct_url=""
+  local upload_result=""
 
   while IFS= read -r site_name; do
     [[ -n "$site_name" ]] || continue
 
     case "$site_name" in
       imgbb)
-        direct_url="$(upload_to_imgbb "$file_path" "$expire_value" || true)"
+        upload_result="$(upload_to_imgbb "$file_path" "$expire_value" || true)"
         ;;
       postimages)
-        direct_url="$(upload_to_postimages "$file_path" "$expire_value" || true)"
+        upload_result="$(upload_to_postimages "$file_path" "$expire_value" || true)"
         ;;
       *)
         die "internal error: unsupported site $site_name"
         ;;
     esac
 
-    if [[ -n "$direct_url" ]]; then
+    if [[ -n "$upload_result" ]]; then
       debug "uploaded $file_path via $site_name"
-      printf '%s\n' "$direct_url"
+      printf '%s\n' "$upload_result"
       return 0
     fi
   done < <(candidate_sites_for_file)
@@ -385,7 +503,8 @@ upload_one_file() {
 
 main() {
   local file_path
-  local direct_url
+  local upload_result
+  local -a results=()
 
   parse_args "$@"
   validate_site "$selected_site"
@@ -393,8 +512,20 @@ main() {
 
   require_cmd curl
   for file_path in "${input_files[@]}"; do
-    direct_url="$(upload_one_file "$file_path")" || die "all upload backends failed for $file_path"
-    printf '%s\n' "$direct_url"
+    upload_result="$(upload_one_file "$file_path")" || die "all upload backends failed for $file_path"
+    results+=("$upload_result")
+  done
+
+  if [[ "$raw_response" -eq 1 ]]; then
+    print_json_results results
+    return
+  fi
+
+  for file_path in "${!results[@]}"; do
+    print_text_result "${results[$file_path]}"
+    if [[ "$file_path" -lt $((${#results[@]} - 1)) ]]; then
+      printf '\n'
+    fi
   done
 }
 
