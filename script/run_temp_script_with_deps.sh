@@ -17,12 +17,13 @@ AUTO_CLEAN=0
 WORK_DIR=""
 ENTRY_PATH=""
 SOURCE_FILE_PATH=""
+SCRIPT_ARGS=()
 
 usage() {
   cat <<EOF
 Usage:
-  script/${SCRIPT_NAME} python --script FILE_OR_TEXT [--deps "PKG..."] [--dir PATH] [--auto-clean] [--verbose]
-  script/${SCRIPT_NAME} node --script FILE_OR_TEXT [--deps "PKG..."] [--dir PATH] [--auto-clean] [--verbose]
+  script/${SCRIPT_NAME} python --script FILE_OR_TEXT [--deps "PKG..."] [--dir PATH] [--auto-clean] [--verbose] [-- SCRIPT_ARGS...]
+  script/${SCRIPT_NAME} node --script FILE_OR_TEXT [--deps "PKG..."] [--dir PATH] [--auto-clean] [--verbose] [-- SCRIPT_ARGS...]
 
 Purpose:
   Run a Python or Node script in a temporary working directory and optionally
@@ -38,6 +39,7 @@ Optional inputs:
   --auto-clean        delete the temporary directory after execution
   --verbose           print debug logs
   --help              show this message
+  --                  stop parsing wrapper args and pass remaining args to the target script
 
 Default behavior:
   - When --dir is omitted and --script points to an existing file, create
@@ -156,12 +158,12 @@ run_python_script() {
     # shellcheck disable=SC1091
     source "$WORK_DIR/.venv/bin/activate"
     python -m pip install $DEPS
-    python "$ENTRY_PATH"
+    python "$ENTRY_PATH" "${SCRIPT_ARGS[@]}"
     deactivate
     return
   fi
 
-  "$python_cmd" "$ENTRY_PATH"
+  "$python_cmd" "$ENTRY_PATH" "${SCRIPT_ARGS[@]}"
 }
 
 run_node_script() {
@@ -178,13 +180,18 @@ run_node_script() {
 
   (
     cd "$WORK_DIR"
-    node "$ENTRY_PATH"
+    node "$ENTRY_PATH" "${SCRIPT_ARGS[@]}"
   )
 }
 
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --)
+        shift
+        SCRIPT_ARGS=("$@")
+        break
+        ;;
       python|node)
         [[ -z "$SUBCOMMAND" ]] || die "subcommand already set: $SUBCOMMAND"
         SUBCOMMAND="$1"
@@ -237,6 +244,9 @@ main() {
     debug "source file: $SOURCE_FILE_PATH"
   else
     debug "source mode: inline text"
+  fi
+  if [[ ${#SCRIPT_ARGS[@]} -gt 0 ]]; then
+    debug "script args: ${SCRIPT_ARGS[*]}"
   fi
 
   case "$SUBCOMMAND" in
