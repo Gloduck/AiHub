@@ -65,9 +65,9 @@ Command-specific inputs:
   delete --hash HASH [--hash HASH ...] [--delete-files]
   clear [--flag N]
   mkdir --dir PATH
-  ls --dir PATH [--offset N] [--limit N]
+  ls --dir PATH [--offset N] [--limit N, default 100]
   info --path PATH
-  search --dir PATH --keyword TEXT [--offset N] [--limit N] [--type N]
+  search --dir PATH --keyword TEXT [--offset N] [--limit N, default 100] [--type N] [--all]
   rm --path PATH [--path PATH ...]
   mv --path PATH [--path PATH ...] --target-dir PATH
   cp --path PATH [--path PATH ...] --target-dir PATH
@@ -75,10 +75,13 @@ Command-specific inputs:
   upload --dir PATH --file LOCAL_PATH [--name FILE_NAME] [--multipart-threshold BYTES] [--part-size BYTES]
 
 Optional inputs:
+  --offset N             ls/search: result offset; default 0
+  --limit N              ls/search: page size; default 100
   --multipart-threshold   upload multipart threshold in bytes; default 10485760
   --part-size BYTES       upload multipart part size in bytes; default 10485760
   --json                  output JSON like the underlying API response
   --raw-response          print raw API response without formatting
+  --all                   search only: fetch all de-duplicated results
   --verbose               print process information to stderr
   --help                  show this message
 
@@ -91,7 +94,8 @@ Dependencies:
 Default behavior:
   - add uses the 115 web offline-download form API with sign/time from the offline space API.
   - upload uses rapid upload first, then OSS PutObject for small files or serial OSS Multipart above threshold.
-  - Commands that accept cloud directories require absolute paths and convert them to 115 ids internally.
+  - Commands that accept cloud directories require absolute paths and fail when any directory is missing.
+  - search without --all returns one result page; use --all for complete de-duplicated results.
   - list/delete/clear call lixian APIs directly with the provided cookie.
   - stdout prints human-friendly text by default; use --json for JSON output.
   - stderr is used for logs and errors.
@@ -229,7 +233,9 @@ cloud_basename() {
 
 dir_id_by_path() {
   local path
-  local query_path
+  local current_id="0"
+  local component
+  local -a components
   local response
   local cid
   path="$(normalize_cloud_path "$1")"
@@ -237,17 +243,21 @@ dir_id_by_path() {
     printf '0\n'
     return
   fi
-  query_path="${path#/}"
-  response="$(cookie_curl --get --data-urlencode "path=${query_path}" "$API_DIR_ID")"
-  cid="$(printf '%s\n' "$response" | jq -r '.id // .cid // .data.id // .data.cid // empty')"
-  [[ -n "$cid" && "$cid" != "null" ]] || die "failed to resolve directory path: $path; response: $response"
-  printf '%s\n' "$cid"
+  IFS='/' read -r -a components <<<"${path#/}"
+  for component in "${components[@]}"; do
+    [[ -n "$component" ]] || continue
+    response="$(list_dir_by_id "$current_id" 0 1150)"
+    cid="$(printf '%s\n' "$response" | jq -r --arg name "$component" 'first(.data[]? | select((.fid // "") == "" and (.cid // "") != "" and .n == $name) | .cid) // empty')"
+    [[ -n "$cid" && "$cid" != "null" ]] || die "failed to resolve directory path: $path"
+    current_id="$cid"
+  done
+  printf '%s\n' "$current_id"
 }
 
 list_dir_by_id() {
   local cid="$1"
   local offset="${2:-0}"
-  local limit="${3:-1150}"
+  local limit="${3:-100}"
   cookie_curl --get \
     --data-urlencode "aid=1" \
     --data-urlencode "cid=${cid}" \
@@ -262,6 +272,38 @@ list_dir_by_id() {
     --data-urlencode "format=json" \
     --data-urlencode "fc_mix=0" \
     "$API_FILE_LIST"
+}
+
+search_by_id() {
+  local cid="$1"
+  local keyword="$2"
+  local offset="${3:-0}"
+  local limit="${4:-100}"
+  local type="${5:-0}"
+  cookie_curl --get \
+    --data-urlencode "aid=7" \
+    --data-urlencode "cid=${cid}" \
+    --data-urlencode "format=json" \
+    --data-urlencode "offset=${offset}" \
+    --data-urlencode "limit=${limit}" \
+    --data-urlencode "search_value=${keyword}" \
+    --data-urlencode "type=${type}" \
+    --data-urlencode "count_folders=1" \
+    --data-urlencode "o=file_name" \
+    --data-urlencode "asc=1" \
+    "$API_FILE_SEARCH"
+}
+
+normalize_paged_response() {
+  local response="$1"
+  local requested_offset="$2"
+  printf '%s\n' "$response" | jq --argjson requested_offset "$requested_offset" '
+    if ([.count // 0, .file_count // 0] | max | tonumber) <= $requested_offset then
+      . + {data: [], offset: $requested_offset}
+    else
+      .
+    end
+  '
 }
 
 object_json_by_path() {
@@ -690,7 +732,7 @@ cmd_mkdir() {
 cmd_ls() {
   local dir_path="/"
   local offset="0"
-  local limit="1150"
+  local limit="100"
   local dir_id
   local response
   while [[ $# -gt 0 ]]; do
@@ -719,6 +761,7 @@ cmd_ls() {
   require_cookie
   dir_id="$(dir_id_by_path "$dir_path")"
   response="$(list_dir_by_id "$dir_id" "$offset" "$limit")"
+  response="$(normalize_paged_response "$response" "$offset")"
   api_check_or_print "$response" ls
 }
 
@@ -750,10 +793,15 @@ cmd_search() {
   local dir_path="/"
   local keyword=""
   local offset="0"
-  local limit="30"
+  local limit="100"
   local type="0"
+  local fetch_all="0"
   local dir_id
   local response
+  local page_offset
+  local max_count
+  local data_len
+  local -a responses=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dir)
@@ -781,6 +829,10 @@ cmd_search() {
         type="$2"
         shift 2
         ;;
+      --all)
+        fetch_all="1"
+        shift
+        ;;
       *)
         parse_common_option "$@"
         shift "$PARSED_SHIFT"
@@ -790,18 +842,39 @@ cmd_search() {
   require_cookie
   [[ -n "$keyword" ]] || die "search requires --keyword"
   dir_id="$(dir_id_by_path "$dir_path")"
-  response="$(cookie_curl --get \
-    --data-urlencode "aid=7" \
-    --data-urlencode "cid=${dir_id}" \
-    --data-urlencode "format=json" \
-    --data-urlencode "offset=${offset}" \
-    --data-urlencode "limit=${limit}" \
-    --data-urlencode "search_value=${keyword}" \
-    --data-urlencode "type=${type}" \
-    --data-urlencode "count_folders=1" \
-    --data-urlencode "o=file_name" \
-    --data-urlencode "asc=1" \
-    "$API_FILE_SEARCH")"
+  if [[ "$fetch_all" == "0" ]]; then
+    response="$(search_by_id "$dir_id" "$keyword" "$offset" "$limit" "$type")"
+    response="$(normalize_paged_response "$response" "$offset")"
+  else
+    page_offset="$offset"
+    max_count=0
+    while :; do
+      response="$(search_by_id "$dir_id" "$keyword" "$page_offset" "$limit" "$type")"
+      responses+=("$response")
+      data_len="$(printf '%s\n' "$response" | jq -r '(.data // []) | length')"
+      max_count="$(printf '%s\n' "$response" | jq -r --argjson current "$max_count" '[($current), (.count // 0), (.file_count // 0)] | max')"
+      (( data_len > 0 )) || break
+      page_offset=$((page_offset + limit))
+      (( page_offset < max_count )) || break
+    done
+    response="$(printf '%s\n' "${responses[@]}" | jq -s '
+      .[0] as $first
+      | (map(.data[]? | . + {__key: ((.fid // .cid // .file_id // .n) | tostring)}) | unique_by(.__key) | map(del(.__key))) as $data
+      | $first + {
+          data: $data,
+          requested_all: true,
+          collected_count: ($data | length),
+          source_count: ([.[].count // 0] | max),
+          source_file_count: ([.[].file_count // 0] | max),
+          source_folder_count: ([.[].folder_count // 0] | max),
+          count: ($data | length),
+          file_count: ($data | map(select(has("fid"))) | length),
+          folder_count: ($data | map(select(has("cid") and (has("fid") | not))) | length),
+          offset: 0,
+          page_count: 1
+        }
+    ')"
+  fi
   api_check_or_print "$response" search
 }
 
