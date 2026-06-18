@@ -52,10 +52,10 @@ Commands:
   ls                      list a cloud directory by absolute path
   info                    get file or directory info by absolute path
   search                  search files under an absolute directory path
-  rm                      delete file or directory by absolute path
-  mv                      move file or directory to an absolute directory path
-  cp                      copy file or directory to an absolute directory path
-  rename                  rename file or directory by absolute path
+  rm                      delete one or more files/directories by absolute path (batch)
+  mv                      move one or more files/directories to an absolute directory path (batch)
+  cp                      copy one or more files/directories to an absolute directory path (batch)
+  rename                  rename one or more files/directories by absolute path (batch)
   upload                  upload a local file by absolute cloud directory path
   download                download a cloud file by absolute path
 
@@ -72,10 +72,10 @@ Command-specific inputs:
   ls --dir PATH [--offset N] [--limit N, default 100]
   info --path PATH
   search --dir PATH --keyword TEXT [--offset N] [--limit N, default 100] [--type N] [--all]
-  rm --path PATH [--path PATH ...]
-  mv --path PATH [--path PATH ...] --target-dir PATH
-  cp --path PATH [--path PATH ...] --target-dir PATH
-  rename --path PATH --name NEW_NAME
+  rm --path PATH [--path PATH ...]                                      # batch
+  mv --path PATH [--path PATH ...] --target-dir PATH                    # batch
+  cp --path PATH [--path PATH ...] --target-dir PATH                    # batch
+  rename --path PATH --name NEW_NAME [--path PATH --name NEW_NAME ...]  # batch
   upload --dir PATH --file LOCAL_PATH [--name FILE_NAME] [--multipart-threshold BYTES] [--part-size BYTES]
   download --path PATH [--output LOCAL_PATH]
 
@@ -462,7 +462,7 @@ standardized_json() {
       {success:ok, command:$command, paths:($ctx.paths // []), target_dir:$ctx.target_dir, message:(if ok then (if $command == "mv" then "moved" else "copied" end) else msg end)}
       + (if ok then {} else {code:code} end)
     elif $command == "rename" then
-      {success:ok, command:$command, path:$ctx.path, new_name:$ctx.new_name, message:(if ok then "renamed" else msg end)}
+      {success:ok, command:$command, paths:($ctx.paths // []), names:($ctx.names // []), renames:($ctx.renames // []), message:(if ok then "renamed" else msg end)}
       + (if ok then {} else {code:code} end)
     elif $command == "upload" then
       ((.initupload // {}) as $i | (.oss_result // {}) as $o |
@@ -1111,20 +1111,24 @@ cmd_mv_or_cp() {
 }
 
 cmd_rename() {
-  local path=""
-  local new_name=""
+  local -a paths=()
+  local -a names=()
+  local -a args=()
+  local path
+  local new_name
   local object_id
+  local index
   local response
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --path)
         [[ $# -ge 2 ]] || die "missing value for --path"
-        path="$2"
+        paths+=("$2")
         shift 2
         ;;
       --name)
         [[ $# -ge 2 ]] || die "missing value for --name"
-        new_name="$2"
+        names+=("$2")
         shift 2
         ;;
       *)
@@ -1134,16 +1138,25 @@ cmd_rename() {
     esac
   done
   require_cookie
-  [[ -n "$path" ]] || die "rename requires --path absolute path"
-  [[ -n "$new_name" ]] || die "rename requires --name"
-  [[ "$(normalize_cloud_path "$path")" != "/" ]] || die "cannot rename root path"
-  object_id="$(object_id_by_path "$path")"
-  response="$(cookie_curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' \
-    --data-urlencode "fid=${object_id}" \
-    --data-urlencode "file_name=${new_name}" \
-    --data-urlencode "files_new_name[${object_id}]=${new_name}" \
-    "$API_FILE_RENAME")"
-  OUTPUT_CONTEXT="$(jq -cn --arg path "$(normalize_cloud_path "$path")" --arg new_name "$new_name" '{path:$path,new_name:$new_name}')"
+  [[ ${#paths[@]} -gt 0 ]] || die "rename requires at least one --path"
+  [[ ${#names[@]} -gt 0 ]] || die "rename requires at least one --name"
+  [[ ${#paths[@]} -eq ${#names[@]} ]] || die "rename requires the same number of --path and --name values"
+  for index in "${!paths[@]}"; do
+    path="${paths[$index]}"
+    new_name="${names[$index]}"
+    [[ -n "$new_name" ]] || die "rename --name cannot be empty"
+    [[ "$(normalize_cloud_path "$path")" != "/" ]] || die "cannot rename root path"
+    object_id="$(object_id_by_path "$path")"
+    args+=(--data-urlencode "files_new_name[${object_id}]=${new_name}")
+    if [[ ${#paths[@]} -eq 1 ]]; then
+      args+=(--data-urlencode "fid=${object_id}" --data-urlencode "file_name=${new_name}")
+    fi
+  done
+  response="$(cookie_curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' "${args[@]}" "$API_FILE_RENAME")"
+  OUTPUT_CONTEXT="$(jq -cn \
+    --argjson paths "$(json_array_from_args "${paths[@]}")" \
+    --argjson names "$(json_array_from_args "${names[@]}")" \
+    '{paths:$paths,names:$names,renames:[range(0; $paths|length) as $i | {path:$paths[$i], new_name:$names[$i]}]}')"
   api_check_or_print "$response" rename
 }
 
