@@ -21,6 +21,7 @@ readonly API_FILE_DELETE="https://webapi.115.com/rb/delete"
 readonly API_FILE_MOVE="https://webapi.115.com/files/move"
 readonly API_FILE_COPY="https://webapi.115.com/files/copy"
 readonly API_FILE_RENAME="https://webapi.115.com/files/batch_rename"
+readonly API_DOWNLOAD_URL="https://proapi.115.com/app/chrome/downurl"
 readonly DEFAULT_APP_VER="35.6.0.3"
 
 SCRIPT_VERBOSE=0
@@ -54,6 +55,7 @@ Commands:
   cp                      copy file or directory to an absolute directory path
   rename                  rename file or directory by absolute path
   upload                  upload a local file by absolute cloud directory path
+  download                download a cloud file by absolute path
 
 Required inputs:
   --cookie VALUE          115 cookie, usually UID=...;CID=...;SEID=...;KID=...
@@ -73,6 +75,7 @@ Command-specific inputs:
   cp --path PATH [--path PATH ...] --target-dir PATH
   rename --path PATH --name NEW_NAME
   upload --dir PATH --file LOCAL_PATH [--name FILE_NAME] [--multipart-threshold BYTES] [--part-size BYTES]
+  download --path PATH [--output LOCAL_PATH]
 
 Optional inputs:
   --offset N             ls/search: result offset; default 0
@@ -367,6 +370,9 @@ friendly_output() {
       ;;
     upload)
       printf '%s\n' "$response" | jq -r 'if (.state == true) then "Upload: ok (mode=" + (if .rapid_upload == true then "rapid_upload" else (.upload_mode // "unknown") end) + ")" else "Upload failed: " + (.error // .message // (.oss_result.message // "unknown error")) end'
+      ;;
+    download)
+      printf '%s\n' "$response" | jq -r 'if (.state == true) then "Download: ok -> " + (.output // "") else "Download failed: " + (.error // .message // "unknown error") end'
       ;;
     *)
       printf '%s\n' "$response" | jq -r 'if (.state == true or (.errno // 0) == 0 or (.errNo // 0) == 0) then "Success" else "Failed: " + (.error // .message // .msg // "unknown error") end'
@@ -1573,6 +1579,65 @@ PY
   api_check_or_print "$upload_response" upload
 }
 
+cmd_download() {
+  local cloud_path=""
+  local output_path=""
+  local object
+  local object_id
+  local info_response
+  local pick_code
+  local name
+  local response
+  local url
+  local final_output
+  local download_cookie_jar="$TMP_DIR/download_cookies.txt"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --path)
+        [[ $# -ge 2 ]] || die "missing value for --path"
+        cloud_path="$2"
+        shift 2
+        ;;
+      --output)
+        [[ $# -ge 2 ]] || die "missing value for --output"
+        output_path="$2"
+        shift 2
+        ;;
+      *)
+        parse_common_option "$@"
+        shift "$PARSED_SHIFT"
+        ;;
+    esac
+  done
+  require_cookie
+  [[ -n "$cloud_path" ]] || die "download requires --path absolute path"
+  object="$(object_json_by_path "$cloud_path")"
+  object_id="$(printf '%s\n' "$object" | jq -r '.resolved_id // .fid // .file_id // empty')"
+  [[ -n "$object_id" && "$object_id" != "null" ]] || die "cloud path is not a downloadable file: $cloud_path"
+  info_response="$(cookie_curl --get --data-urlencode "file_id=${object_id}" "$API_FILE_INFO")"
+  pick_code="$(printf '%s\n' "$info_response" | jq -r '.data[0].pick_code // .data[0].pc // .data.files[0].pick_code // .data.files[0].pc // .files[0].pick_code // .files[0].pc // empty')"
+  name="$(printf '%s\n' "$object" | jq -r '.n // .name // empty')"
+  [[ -n "$pick_code" && "$pick_code" != "null" ]] || die "cloud path is not a downloadable file or has no pickcode: $cloud_path"
+  if [[ -z "$output_path" ]]; then
+    output_path="$name"
+  fi
+  [[ -n "$output_path" ]] || die "download output path is empty"
+
+  response="$(curl -fsSL -c "$download_cookie_jar" \
+    -H "Cookie: $COOKIE" \
+    -H "User-Agent: Mozilla/5.0 115Browser/$(resolve_app_ver)" \
+    "https://webapi.115.com/files/download?pickcode=$(jq -rn --arg v "$pick_code" '$v|@uri')")"
+  url="$(printf '%s\n' "$response" | jq -r '.file_url // empty')"
+  [[ -n "$url" && "$url" != "null" ]] || die "failed to get download url: $response"
+  curl -fL \
+    -b "$download_cookie_jar" \
+    -H "User-Agent: Mozilla/5.0 115Browser/$(resolve_app_ver)" \
+    -o "$output_path" \
+    "$url" >/dev/null 2>&1
+  final_output="$(realpath -m "$output_path" 2>/dev/null || printf '%s' "$output_path")"
+  api_check_or_print "$(jq -cn --arg output "$final_output" --arg path "$cloud_path" --arg name "$name" '{state:true,path:$path,name:$name,output:$output}')" download
+}
+
 PARSED_SHIFT=0
 parse_common_option() {
   case "$1" in
@@ -1666,6 +1731,9 @@ main() {
       ;;
     upload)
       cmd_upload "$@"
+      ;;
+    download)
+      cmd_download "$@"
       ;;
     *)
       die "unknown command: $command"
