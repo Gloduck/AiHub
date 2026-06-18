@@ -22,35 +22,37 @@ if /i "%~1"=="--verbose" (
 )
 if /i "%~1"=="--help" goto usage
 if /i "%~1"=="-h" goto usage
-echo [ERROR] unknown argument: %~1 1>&2
+echo error: unknown argument: %~1 1>&2
 exit /b 1
 
 :arg_value_error
-echo [ERROR] --file requires a value 1>&2
+echo error: --file requires a value 1>&2
 exit /b 1
 
 :args_done
 if not defined ENV_FILE call :resolve_default_env_file
 if not defined ENV_FILE (
-  echo [ERROR] env.ini not found in script directory or current working directory 1>&2
+  echo error: env.ini not found in script directory or current working directory 1>&2
   exit /b 1
 )
 
 for %%I in ("%ENV_FILE%") do set "ENV_FILE=%%~fI"
 if not exist "%ENV_FILE%" (
-  echo [ERROR] env file not found: %ENV_FILE% 1>&2
+  echo error: env file not found: %ENV_FILE% 1>&2
   exit /b 1
 )
 
-if "%VERBOSE%"=="1" echo [DEBUG] loading env file: %ENV_FILE% 1>&2
+if "%VERBOSE%"=="1" echo loading env file: %ENV_FILE% 1>&2
 set "LOAD_KEYS="
 call :load_env_file
 if errorlevel 1 exit /b 1
-echo [INFO] loaded %LOAD_COUNT% variables from %ENV_FILE% 1>&2
-if defined LOAD_KEYS (
-  echo [INFO] loaded keys: %LOAD_KEYS% 1>&2
-) else (
-  echo [INFO] loaded keys: (none) 1>&2
+if "%VERBOSE%"=="1" (
+  echo loaded %LOAD_COUNT% variables from %ENV_FILE% 1>&2
+  if defined LOAD_KEYS (
+    echo loaded keys: %LOAD_KEYS% 1>&2
+  ) else (
+    echo loaded keys: (none) 1>&2
+  )
 )
 exit /b 0
 
@@ -62,7 +64,7 @@ echo   Load KEY=VALUE entries from env.ini into the current cmd environment and 
 echo.
 echo Optional inputs:
 echo   --file     custom env.ini path
-echo   --verbose  print debug logs
+echo   --verbose  print process information
 echo   --help     show this message
 echo.
 echo Default env.ini lookup order when --file is omitted:
@@ -104,24 +106,24 @@ for /f "tokens=1* delims==" %%A in ("%LINE%") do (
 )
 
 if not defined KEY (
-  echo [ERROR] invalid line in env file: %LINE% 1>&2
+  echo error: invalid line in env file: %LINE% 1>&2
   exit /b 1
 )
 
 if "%LINE%"=="%KEY%" if not "%LINE:~-1%"=="=" (
-  echo [ERROR] invalid line in env file: %LINE% 1>&2
+  echo error: invalid line in env file: %LINE% 1>&2
   exit /b 1
 )
 
 echo(%VALUE%| findstr "=" >nul
 if not errorlevel 1 (
-  echo [ERROR] invalid line in env file: %LINE% 1>&2
+  echo error: invalid line in env file: %LINE% 1>&2
   exit /b 1
 )
 
 echo(%KEY%| findstr /r "^[A-Za-z_][A-Za-z0-9_]*$" >nul
 if errorlevel 1 (
-  echo [ERROR] invalid env name: %KEY% 1>&2
+  echo error: invalid env name: %KEY% 1>&2
   exit /b 1
 )
 
@@ -132,7 +134,7 @@ if defined LOAD_KEYS (
 ) else (
   set "LOAD_KEYS=%KEY%"
 )
-if "%VERBOSE%"=="1" echo [DEBUG] loaded %KEY% 1>&2
+if "%VERBOSE%"=="1" echo loaded %KEY% 1>&2
 set "KEY="
 set "VALUE="
 exit /b 0

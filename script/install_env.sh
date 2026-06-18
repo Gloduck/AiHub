@@ -2,8 +2,56 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-# shellcheck source=_lib/common.sh
-source "$SCRIPT_DIR/_lib/common.sh"
+
+resolve_from_cwd() {
+  local raw_path="$1"
+  local normalized_path="$raw_path"
+  local drive_letter
+
+  if [[ "$raw_path" = /* ]]; then
+    realpath -m "$raw_path"
+    return
+  fi
+
+  if [[ "$raw_path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      normalized_path="$(cygpath -u "$raw_path")"
+    else
+      drive_letter="${raw_path:0:1}"
+      drive_letter="${drive_letter,}"
+      normalized_path="/$drive_letter/${raw_path:2}"
+      normalized_path="${normalized_path//\\//}"
+    fi
+    realpath -m "$normalized_path"
+    return
+  fi
+
+  if [[ ( "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* || "${OSTYPE:-}" == win32* ) && "$raw_path" == *\\* ]]; then
+    normalized_path="${raw_path//\\//}"
+  fi
+
+  realpath -m "$PWD/$normalized_path"
+}
+
+verbose_log() {
+  if [[ "${SCRIPT_VERBOSE:-0}" = "1" ]]; then
+    printf '%s\n' "$*" >&2
+  fi
+}
+
+error() {
+  printf 'error: %s\n' "$*" >&2
+}
+
+die() {
+  error "$@"
+  exit 1
+}
+
+require_cmd() {
+  local command_name="$1"
+  command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"
+}
 
 usage() {
   cat <<'EOF'
@@ -19,7 +67,7 @@ Optional inputs:
   --config       custom config json path, defaults to script/install_env_sources.json
   --force        overwrite target directory if it already exists
   --no-profile   skip writing /etc/profile.d
-  --verbose      print debug logs
+  --verbose      print process information
   --help         show this message
 
 If any required input is missing, the script switches to interactive mode
@@ -387,7 +435,7 @@ archive_path="$tmp_dir/package.${archive_type##*.}"
 extract_dir="$tmp_dir/extract"
 mkdir -p "$extract_dir"
 
-info "downloading $package_url"
+verbose_log "downloading $package_url"
 curl -fL "$package_url" -o "$archive_path"
 extract_archive "$archive_path" "$archive_type" "$extract_dir"
 copy_payload "$extract_dir" "$install_dir"

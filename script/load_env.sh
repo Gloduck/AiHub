@@ -13,7 +13,7 @@ Purpose:
 
 Optional inputs:
   --file     custom env.ini path
-  --verbose  print debug logs
+  --verbose  print process information
   --help     show this message
 
 Default env.ini lookup order when --file is omitted:
@@ -34,25 +34,14 @@ is_sourced() {
   [[ "${BASH_SOURCE[0]}" != "$0" ]]
 }
 
-log() {
-  local level="$1"
-  shift
-  printf '[%s] %s\n' "$level" "$*" >&2
-}
-
-debug() {
+verbose_log() {
   if [[ "$SCRIPT_VERBOSE" == "1" ]]; then
-    log "DEBUG" "$@"
+    printf '%s\n' "$*" >&2
   fi
 }
 
-info() {
-  log "INFO" "$@"
-}
-
-fail() {
-  log "ERROR" "$@"
-  return 1
+error() {
+  printf 'error: %s\n' "$*" >&2
 }
 
 resolve_env_file() {
@@ -88,31 +77,39 @@ load_env_file() {
   local count=0
   local loaded_keys=()
 
-  [[ -f "$env_file" ]] || fail "env file not found: $env_file" || return 1
+  if [[ ! -f "$env_file" ]]; then
+    error "env file not found: $env_file"
+    return 1
+  fi
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"
 
     [[ -z "$line" ]] && continue
-    [[ "$line" == *=* ]] || fail "invalid line in env file: $line" || return 1
-    [[ "${line#*=}" != *"="* ]] || fail "invalid line in env file: $line" || return 1
+    if [[ "$line" != *=* || "${line#*=}" == *"="* ]]; then
+      error "invalid line in env file: $line"
+      return 1
+    fi
 
     key="${line%%=*}"
     value="${line#*=}"
 
-    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || fail "invalid env name: $key" || return 1
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      error "invalid env name: $key"
+      return 1
+    fi
 
     export "$key=$value"
-    debug "loaded $key"
+    verbose_log "loaded $key"
     loaded_keys+=("$key")
     count=$((count + 1))
   done <"$env_file"
 
-  info "loaded $count variables from $env_file"
+  verbose_log "loaded $count variables from $env_file"
   if [[ "$count" -gt 0 ]]; then
-    info "loaded keys: ${loaded_keys[*]}"
+    verbose_log "loaded keys: ${loaded_keys[*]}"
   else
-    info "loaded keys: (none)"
+    verbose_log "loaded keys: (none)"
   fi
 }
 
@@ -122,7 +119,10 @@ main() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --file)
-        [[ $# -ge 2 ]] || fail "--file requires a value" || return 1
+        if [[ $# -lt 2 ]]; then
+          error "--file requires a value"
+          return 1
+        fi
         env_file="$2"
         shift 2
         ;;
@@ -135,17 +135,22 @@ main() {
         return 0
         ;;
       *)
-        fail "unknown argument: $1" || return 1
+        error "unknown argument: $1"
+        return 1
         ;;
     esac
   done
 
   if ! is_sourced; then
-    fail "this script must be sourced, for example: source ${SCRIPT_NAME} [--file PATH]" || return 1
+    error "this script must be sourced, for example: source $SCRIPT_NAME [--file PATH]"
+    return 1
   fi
 
   env_file="$(resolve_env_file "$env_file")"
-  [[ -n "$env_file" ]] || fail "env.ini not found in script directory or current working directory" || return 1
+  if [[ -z "$env_file" ]]; then
+    error "env.ini not found in script directory or current working directory"
+    return 1
+  fi
   load_env_file "$env_file"
 }
 

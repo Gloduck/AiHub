@@ -2,7 +2,59 @@
 
 set -euo pipefail
 
-source "$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/_lib/common.sh"
+resolve_from_cwd() {
+  local raw_path="$1"
+  local normalized_path="$raw_path"
+  local drive_letter
+
+  if [[ "$raw_path" = /* ]]; then
+    realpath -m "$raw_path"
+    return
+  fi
+
+  if [[ "$raw_path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      normalized_path="$(cygpath -u "$raw_path")"
+    else
+      drive_letter="${raw_path:0:1}"
+      drive_letter="${drive_letter,}"
+      normalized_path="/$drive_letter/${raw_path:2}"
+      normalized_path="${normalized_path//\\//}"
+    fi
+    realpath -m "$normalized_path"
+    return
+  fi
+
+  if [[ ( "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* || "${OSTYPE:-}" == win32* ) && "$raw_path" == *\\* ]]; then
+    normalized_path="${raw_path//\\//}"
+  fi
+
+  realpath -m "$PWD/$normalized_path"
+}
+
+verbose_log() {
+  if [[ "${SCRIPT_VERBOSE:-0}" = "1" ]]; then
+    printf '%s\n' "$*" >&2
+  fi
+}
+
+warn() {
+  printf 'warning: %s\n' "$*" >&2
+}
+
+error() {
+  printf 'error: %s\n' "$*" >&2
+}
+
+die() {
+  error "$@"
+  exit 1
+}
+
+require_cmd() {
+  local command_name="$1"
+  command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"
+}
 
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly IMGBB_AUTH_URL="https://imgbb.com/"
@@ -35,7 +87,7 @@ Optional inputs:
   --site NAME              upload backend: postimages or imgbb
   --expire VALUE           auto-delete time like 300s, 30m, 1d; omitted means no expiration
   --raw-response           output JSON instead of text blocks
-  --verbose                print debug logs to stderr
+  --verbose                print process information to stderr
   --help                   show this message
 
 Default behavior:
@@ -335,7 +387,7 @@ upload_to_imgbb() {
     return 1
   }
 
-  debug "uploading via ImgBB: $file_path"
+  verbose_log "uploading via ImgBB: $file_path"
   if [[ -n "$expiration_token" ]]; then
     response="$(curl -sS --fail "$IMGBB_UPLOAD_URL" \
       -H 'Accept: application/json' \
@@ -395,7 +447,7 @@ upload_to_postimages() {
   expire_seconds_value="$(parse_expire_to_seconds "$expire_value")"
   upload_session="$(date +%s%3N).${RANDOM}${RANDOM}"
 
-  debug "uploading via Postimages: $file_path"
+  verbose_log "uploading via Postimages: $file_path"
   response="$(curl -sS --fail "$POSTIMAGES_UPLOAD_URL" \
     -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36' \
     -H 'Accept: application/json' \
@@ -492,7 +544,7 @@ upload_one_file() {
     esac
 
     if [[ -n "$upload_result" ]]; then
-      debug "uploaded $file_path via $site_name"
+      verbose_log "uploaded $file_path via $site_name"
       printf '%s\n' "$upload_result"
       return 0
     fi

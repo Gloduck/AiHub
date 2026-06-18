@@ -64,17 +64,17 @@ if /i "%~1"=="--no-profile" (
 )
 if /i "%~1"=="--help" goto usage
 
-echo [ERROR] unknown argument: %~1
+echo error: unknown argument: %~1
 exit /b 1
 
 :arg_value_error
-echo [ERROR] %~1 requires a value
+echo error: %~1 requires a value
 exit /b 1
 
 :args_done
 for %%I in ("%CONFIG_PATH%") do set "CONFIG_PATH=%%~fI"
 if not exist "%CONFIG_PATH%" (
-  echo [ERROR] config file not found: %CONFIG_PATH%
+  echo error: config file not found: %CONFIG_PATH%
   exit /b 1
 )
 
@@ -101,7 +101,7 @@ if not defined VERSION (
   call :prompt_version
 )
 if not defined VERSION (
-  echo [ERROR] version is required
+  echo error: version is required
   exit /b 1
 )
 
@@ -110,7 +110,7 @@ if not defined INSTALL_DIR (
   call :prompt_install_dir
 )
 if not defined INSTALL_DIR (
-  echo [ERROR] install dir is required
+  echo error: install dir is required
   exit /b 1
 )
 if "%INTERACTIVE%"=="1" if "%NO_PROFILE_SPECIFIED%"=="0" call :prompt_no_profile
@@ -155,7 +155,7 @@ if /i "%PROCESSOR_ARCHITEW6432%"=="AMD64" set "DETECTED_ARCH=x64"
 if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" set "DETECTED_ARCH=arm64"
 if /i "%PROCESSOR_ARCHITEW6432%"=="ARM64" set "DETECTED_ARCH=arm64"
 if not defined DETECTED_ARCH (
-  echo [ERROR] unsupported architecture: %PROCESSOR_ARCHITECTURE%
+  echo error: unsupported architecture: %PROCESSOR_ARCHITECTURE%
   exit /b 1
 )
 exit /b 0
@@ -167,14 +167,14 @@ if /i "%VALUE%"=="maven" exit /b 0
 if /i "%VALUE%"=="java" exit /b 0
 if /i "%VALUE%"=="python" exit /b 0
 if /i "%VALUE%"=="golang" exit /b 0
-echo [ERROR] unsupported env: %VALUE%
+echo error: unsupported env: %VALUE%
 exit /b 1
 
 :validate_arch
 set "VALUE=%~1"
 if /i "%VALUE%"=="x64" exit /b 0
 if /i "%VALUE%"=="arm64" exit /b 0
-echo [ERROR] unsupported arch: %VALUE%
+echo error: unsupported arch: %VALUE%
 exit /b 1
 
 :prompt_env
@@ -190,7 +190,7 @@ if "%CHOICE%"=="3" set "ENV_NAME=java"
 if "%CHOICE%"=="4" set "ENV_NAME=python"
 if "%CHOICE%"=="5" set "ENV_NAME=golang"
 if not defined ENV_NAME (
-  echo [ERROR] invalid selection: %CHOICE%
+  echo error: invalid selection: %CHOICE%
   exit /b 1
 )
 exit /b 0
@@ -204,7 +204,7 @@ set "VERSION_FILE=%TEMP%\install-env-version-%RANDOM%%RANDOM%.txt"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$cfg = Get-Content -Raw $env:INSTALLER_CONFIG | ConvertFrom-Json; $envBlock = $cfg.PSObject.Properties[$env:INSTALLER_ENV_NAME].Value; if (-not $envBlock) { exit 2 }; $key = 'windows-' + $env:INSTALLER_ARCH; $fallback = 'windows-any'; $versions = @($envBlock.version.PSObject.Properties | Where-Object { $_.Value.PSObject.Properties.Name -contains $key -or $_.Value.PSObject.Properties.Name -contains $fallback } | Select-Object -ExpandProperty Name | Sort-Object); $index = 0; if ([int]::TryParse($env:VERSION_CHOICE, [ref]$index) -and $index -ge 1 -and $index -le $versions.Count) { $versions[$index - 1] } else { exit 3 }" > "%VERSION_FILE%"
 if errorlevel 1 (
   del "%VERSION_FILE%" >nul 2>nul
-  echo [ERROR] invalid selection: %VERSION_CHOICE%
+  echo error: invalid selection: %VERSION_CHOICE%
   exit /b 1
 )
 set /p "VERSION=" < "%VERSION_FILE%"
@@ -222,7 +222,7 @@ set /p "PROFILE_CHOICE=Please select profile mode: "
 if "%PROFILE_CHOICE%"=="1" set "NO_PROFILE=0"
 if "%PROFILE_CHOICE%"=="2" set "NO_PROFILE=1"
 if not defined NO_PROFILE (
-  echo [ERROR] invalid selection: %PROFILE_CHOICE%
+  echo error: invalid selection: %PROFILE_CHOICE%
   exit /b 1
 )
 exit /b 0
@@ -245,7 +245,7 @@ if /i "%VALUE:~-4%"==".zip" (
   set "ARCHIVE_TYPE=zip"
   exit /b 0
 )
-echo [ERROR] unsupported archive type in url: %VALUE%
+echo error: unsupported archive type in url: %VALUE%
 exit /b 1
 
 :lookup_package
@@ -253,13 +253,13 @@ set "META_FILE=%TEMP%\install-env-meta-%RANDOM%%RANDOM%.txt"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$cfg = Get-Content -Raw $env:INSTALLER_CONFIG | ConvertFrom-Json; $envBlock = $cfg.PSObject.Properties[$env:INSTALLER_ENV_NAME].Value; if (-not $envBlock) { exit 2 }; $key = 'windows-' + $env:INSTALLER_ARCH; $fallback = 'windows-any'; $versionBlock = $envBlock.version.PSObject.Properties[$env:INSTALLER_VERSION].Value; if (-not $versionBlock) { exit 2 }; $url = if ($versionBlock.PSObject.Properties.Name -contains $key) { $versionBlock.$key } elseif ($versionBlock.PSObject.Properties.Name -contains $fallback) { $versionBlock.$fallback } else { exit 2 }; 'URL=' + $url" > "%META_FILE%"
 if errorlevel 1 (
   del "%META_FILE%" >nul 2>nul
-  echo [ERROR] no package found for env=%ENV_NAME% version=%VERSION% os=windows arch=%ARCH%
+  echo error: no package found for env=%ENV_NAME% version=%VERSION% os=windows arch=%ARCH%
   exit /b 1
 )
 for /f "usebackq tokens=1,* delims==" %%A in ("%META_FILE%") do set "%%A=%%B"
 del "%META_FILE%" >nul 2>nul
 if not defined URL (
-  echo [ERROR] failed to read package metadata from config
+  echo error: failed to read package metadata from config
   exit /b 1
 )
 call :detect_archive_type "%URL%"
@@ -268,7 +268,7 @@ exit /b 0
 
 :install_package
 if /i not "%ARCHIVE_TYPE%"=="zip" (
-  echo [ERROR] windows bat installer currently supports zip packages only, got %ARCHIVE_TYPE%
+  echo error: windows bat installer currently supports zip packages only, got %ARCHIVE_TYPE%
   exit /b 1
 )
 

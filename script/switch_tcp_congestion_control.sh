@@ -2,8 +2,26 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-# shellcheck source=_lib/common.sh
-source "$SCRIPT_DIR/_lib/common.sh"
+
+verbose_log() {
+  if [[ "${SCRIPT_VERBOSE:-0}" = "1" ]]; then
+    printf '%s\n' "$*" >&2
+  fi
+}
+
+error() {
+  printf 'error: %s\n' "$*" >&2
+}
+
+die() {
+  error "$@"
+  exit 1
+}
+
+require_cmd() {
+  local command_name="$1"
+  command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"
+}
 
 SCRIPT_VERBOSE=0
 algorithm=""
@@ -23,7 +41,7 @@ Required inputs:
   --algorithm   bbr | cubic | reno
 
 Optional inputs:
-  --verbose     print debug logs
+  --verbose     print process information
   --help        show this message
 
 Default behavior:
@@ -123,7 +141,7 @@ print_status() {
 main() {
   parse_args "$@"
   require_root_user
-  debug "selected algorithm: $algorithm"
+  verbose_log "selected algorithm: $algorithm"
   configure_bbr_module
   ensure_supported_algorithm
   remove_legacy_configs

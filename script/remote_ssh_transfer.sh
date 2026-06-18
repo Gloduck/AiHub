@@ -2,8 +2,56 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-# shellcheck source=_lib/common.sh
-source "$SCRIPT_DIR/_lib/common.sh"
+
+resolve_from_cwd() {
+  local raw_path="$1"
+  local normalized_path="$raw_path"
+  local drive_letter
+
+  if [[ "$raw_path" = /* ]]; then
+    realpath -m "$raw_path"
+    return
+  fi
+
+  if [[ "$raw_path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      normalized_path="$(cygpath -u "$raw_path")"
+    else
+      drive_letter="${raw_path:0:1}"
+      drive_letter="${drive_letter,}"
+      normalized_path="/$drive_letter/${raw_path:2}"
+      normalized_path="${normalized_path//\\//}"
+    fi
+    realpath -m "$normalized_path"
+    return
+  fi
+
+  if [[ ( "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* || "${OSTYPE:-}" == win32* ) && "$raw_path" == *\\* ]]; then
+    normalized_path="${raw_path//\\//}"
+  fi
+
+  realpath -m "$PWD/$normalized_path"
+}
+
+verbose_log() {
+  if [[ "${SCRIPT_VERBOSE:-0}" = "1" ]]; then
+    printf '%s\n' "$*" >&2
+  fi
+}
+
+error() {
+  printf 'error: %s\n' "$*" >&2
+}
+
+die() {
+  error "$@"
+  exit 1
+}
+
+require_cmd() {
+  local command_name="$1"
+  command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"
+}
 
 HOST_ENV="REMOTE_SSH_HOST"
 PORT_ENV="REMOTE_SSH_PORT"
@@ -27,7 +75,7 @@ Options:
   --source SOURCE               Source file or directory. Can be provided multiple times.
   --destination DESTINATION     Destination directory. Created automatically if missing.
   --accept-host-key             Set StrictHostKeyChecking=accept-new.
-  --verbose                     Print debug logs.
+  --verbose                     Print process information.
 
 Required inputs:
   upload|download, --host, --user, --destination, and at least one --source
@@ -194,7 +242,7 @@ if [[ -n "$password" ]]; then
   )
 fi
 
-info "connecting to $user_name@$host:$port"
+verbose_log "connecting to $user_name@$host:$port"
 
 if [[ "$direction" == "upload" ]]; then
   upload_sources=()
@@ -222,9 +270,9 @@ if [[ "$direction" == "upload" ]]; then
     "$upload_target"
   )
 
-  info "uploading ${#upload_sources[@]} source(s) to $destination"
-  debug "mkdir command: ${mkdir_ssh_command[*]}"
-  debug "scp command: ${scp_command[*]}"
+  verbose_log "uploading ${#upload_sources[@]} source(s) to $destination"
+  verbose_log "mkdir command: ${mkdir_ssh_command[*]}"
+  verbose_log "scp command: ${scp_command[*]}"
 
   set +e
   env "${ssh_env[@]}" "${mkdir_ssh_command[@]}"
@@ -257,8 +305,8 @@ scp_command=(
   "$download_destination"
 )
 
-info "downloading ${#download_sources[@]} source(s) to $download_destination"
-debug "scp command: ${scp_command[*]}"
+verbose_log "downloading ${#download_sources[@]} source(s) to $download_destination"
+verbose_log "scp command: ${scp_command[*]}"
 
 set +e
 env "${ssh_env[@]}" "${scp_command[@]}"

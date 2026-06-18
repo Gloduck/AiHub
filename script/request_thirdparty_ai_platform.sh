@@ -5,8 +5,29 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 
-# shellcheck source=script/_lib/common.sh
-source "$SCRIPT_DIR/_lib/common.sh"
+ensure_parent_dir() {
+  mkdir -p "$(dirname "$1")"
+}
+
+verbose_log() {
+  if [[ "${SCRIPT_VERBOSE:-0}" = "1" ]]; then
+    printf '%s\n' "$*" >&2
+  fi
+}
+
+error() {
+  printf 'error: %s\n' "$*" >&2
+}
+
+die() {
+  error "$@"
+  exit 1
+}
+
+require_cmd() {
+  local command_name="$1"
+  command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"
+}
 
 SCRIPT_VERBOSE=0
 FORMAT=""
@@ -72,7 +93,7 @@ Optional inputs:
   --raw-response       output raw JSON response instead of AI text
   --output PATH        write the selected output content to file instead of stdout
   --dry-run            print request metadata and JSON payload, do not send
-  --verbose            print debug logs
+  --verbose            print process information
   --help               show this message
 
 Environment variable lookup order:
@@ -521,7 +542,7 @@ write_output() {
   if [[ -n "$DECLARE_RESPONSE_PATH" ]]; then
     ensure_parent_dir "$DECLARE_RESPONSE_PATH"
     printf '%s' "$output_value" >"$DECLARE_RESPONSE_PATH"
-    info "response written to $DECLARE_RESPONSE_PATH"
+    verbose_log "response written to $DECLARE_RESPONSE_PATH"
     return
   fi
 
@@ -630,7 +651,7 @@ send_request() {
       ;;
   esac
 
-  debug "sending request to $endpoint"
+  verbose_log "sending request to $endpoint"
   case "$SUBCOMMAND" in
     models)
       response_body="$(curl --silent --show-error --fail-with-body -X "$request_method" "$endpoint" "${curl_args[@]}")"

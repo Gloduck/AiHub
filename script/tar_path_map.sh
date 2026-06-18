@@ -2,8 +2,71 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-# shellcheck source=_lib/common.sh
-source "$SCRIPT_DIR/_lib/common.sh"
+
+resolve_from_cwd() {
+  local raw_path="$1"
+  local normalized_path="$raw_path"
+  local drive_letter
+
+  if [[ "$raw_path" = /* ]]; then
+    realpath -m "$raw_path"
+    return
+  fi
+
+  if [[ "$raw_path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      normalized_path="$(cygpath -u "$raw_path")"
+    else
+      drive_letter="${raw_path:0:1}"
+      drive_letter="${drive_letter,}"
+      normalized_path="/$drive_letter/${raw_path:2}"
+      normalized_path="${normalized_path//\\//}"
+    fi
+    realpath -m "$normalized_path"
+    return
+  fi
+
+  if [[ ( "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* || "${OSTYPE:-}" == win32* ) && "$raw_path" == *\\* ]]; then
+    normalized_path="${raw_path//\\//}"
+  fi
+
+  realpath -m "$PWD/$normalized_path"
+}
+
+ensure_parent_dir() {
+  mkdir -p "$(dirname "$1")"
+}
+
+trim_whitespace() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s\n' "$value"
+}
+
+verbose_log() {
+  if [[ "${SCRIPT_VERBOSE:-0}" = "1" ]]; then
+    printf '%s\n' "$*" >&2
+  fi
+}
+
+warn() {
+  printf 'warning: %s\n' "$*" >&2
+}
+
+error() {
+  printf 'error: %s\n' "$*" >&2
+}
+
+die() {
+  error "$@"
+  exit 1
+}
+
+require_cmd() {
+  local command_name="$1"
+  command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"
+}
 
 SCRIPT_VERBOSE=0
 
@@ -41,7 +104,7 @@ Optional inputs:
   --map RULE         Mapping rule in archive/path|/real/path format. Can be repeated.
   --map-file FILE    Text file with include(...) and optional exclude(...) rules.
   --output DIR       Extract the whole archive to this directory. Only for unpack.
-  --verbose          Print debug logs.
+  --verbose          Print process information.
   --help             Show this message and exit.
 
 Default behavior:
@@ -285,7 +348,7 @@ run_tar_pack_command() {
   done
 
   tar_command+=(-- "$source_name")
-  debug "tar command: ${tar_command[*]}"
+  verbose_log "tar command: ${tar_command[*]}"
 
   set +e
   "${tar_command[@]}"
@@ -383,12 +446,12 @@ pack_archive() {
 
   for raw_rule in "${mapping_rules[@]}"; do
     parse_mapping "$raw_rule" archive_path filesystem_path
-    info "packing $filesystem_path -> $archive_path"
+    verbose_log "packing $filesystem_path -> $archive_path"
     run_tar_pack_command "$archive_path" "$filesystem_path" "$temp_tar" "$tar_mode"
     tar_mode="r"
   done
 
-  info "creating archive: $archive_file"
+  verbose_log "creating archive: $archive_file"
   ensure_parent_dir "$archive_file"
   case "$archive_file" in
     *.tar)
@@ -401,7 +464,7 @@ pack_archive() {
       die "unsupported archive extension: $archive_file"
       ;;
   esac
-  info "archive created: $archive_file"
+  verbose_log "archive created: $archive_file"
 }
 
 read_archive_members() {
@@ -425,7 +488,7 @@ extract_whole_archive() {
   done
 
   mkdir -p "$destination_dir"
-  info "extracting archive to: $destination_dir"
+  verbose_log "extracting archive to: $destination_dir"
   tar -xf "$archive_file" -C "$destination_dir"
 }
 
@@ -506,12 +569,12 @@ unpack_archive() {
 
   if [[ -n "$output_dir" ]]; then
     extract_whole_archive
-    info "archive extracted: $archive_file"
+    verbose_log "archive extracted: $archive_file"
     return
   fi
 
   extract_selected_mappings
-  info "selected archive paths extracted: $archive_file"
+  verbose_log "selected archive paths extracted: $archive_file"
 }
 
 (( $# > 0 )) || {

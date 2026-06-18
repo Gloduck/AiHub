@@ -5,8 +5,59 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 
-# shellcheck source=script/_lib/common.sh
-source "$SCRIPT_DIR/_lib/common.sh"
+resolve_from_cwd() {
+  local raw_path="$1"
+  local normalized_path="$raw_path"
+  local drive_letter
+
+  if [[ "$raw_path" = /* ]]; then
+    realpath -m "$raw_path"
+    return
+  fi
+
+  if [[ "$raw_path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      normalized_path="$(cygpath -u "$raw_path")"
+    else
+      drive_letter="${raw_path:0:1}"
+      drive_letter="${drive_letter,}"
+      normalized_path="/$drive_letter/${raw_path:2}"
+      normalized_path="${normalized_path//\\//}"
+    fi
+    realpath -m "$normalized_path"
+    return
+  fi
+
+  if [[ ( "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* || "${OSTYPE:-}" == win32* ) && "$raw_path" == *\\* ]]; then
+    normalized_path="${raw_path//\\//}"
+  fi
+
+  realpath -m "$PWD/$normalized_path"
+}
+
+verbose_log() {
+  if [[ "${SCRIPT_VERBOSE:-0}" = "1" ]]; then
+    printf '%s\n' "$*" >&2
+  fi
+}
+
+warn() {
+  printf 'warning: %s\n' "$*" >&2
+}
+
+error() {
+  printf 'error: %s\n' "$*" >&2
+}
+
+die() {
+  error "$@"
+  exit 1
+}
+
+require_cmd() {
+  local command_name="$1"
+  command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"
+}
 
 SCRIPT_VERBOSE=0
 SUBCOMMAND=""
@@ -37,7 +88,7 @@ Optional inputs:
   --deps "PKG..."     space-separated dependency list, same option name for both languages
   --dir PATH          explicit temporary directory path
   --auto-clean        delete the temporary directory after execution
-  --verbose           print debug logs
+  --verbose           print process information
   --help              show this message
   --                  stop parsing wrapper args and pass remaining args to the target script
 
@@ -65,7 +116,7 @@ EOF
 
 cleanup_work_dir() {
   if [[ "$AUTO_CLEAN" == "1" && -n "$WORK_DIR" && -d "$WORK_DIR" ]]; then
-    debug "removing temp directory: $WORK_DIR"
+    verbose_log "removing temp directory: $WORK_DIR"
     rm -rf -- "$WORK_DIR"
   fi
 }
@@ -153,7 +204,7 @@ run_python_script() {
   copy_or_write_entry "main.py"
 
   if [[ -n "$DEPS" ]]; then
-    debug "creating python venv in $WORK_DIR/.venv"
+    verbose_log "creating python venv in $WORK_DIR/.venv"
     "$python_cmd" -m venv "$WORK_DIR/.venv"
     # shellcheck disable=SC1091
     source "$WORK_DIR/.venv/bin/activate"
@@ -173,7 +224,7 @@ run_node_script() {
   copy_or_write_entry "main.js"
 
   if [[ -n "$DEPS" ]]; then
-    debug "installing node packages into $WORK_DIR"
+    verbose_log "installing node packages into $WORK_DIR"
     npm --prefix "$WORK_DIR" init -y >/dev/null 2>&1
     npm --prefix "$WORK_DIR" install --no-save $DEPS >/dev/null
   fi
@@ -238,15 +289,15 @@ main() {
   SOURCE_FILE_PATH="$(resolve_source_file_path)"
   prepare_work_dir
 
-  debug "language: $SUBCOMMAND"
-  debug "temp directory: $WORK_DIR"
+  verbose_log "language: $SUBCOMMAND"
+  verbose_log "temp directory: $WORK_DIR"
   if [[ -n "$SOURCE_FILE_PATH" ]]; then
-    debug "source file: $SOURCE_FILE_PATH"
+    verbose_log "source file: $SOURCE_FILE_PATH"
   else
-    debug "source mode: inline text"
+    verbose_log "source mode: inline text"
   fi
   if [[ ${#SCRIPT_ARGS[@]} -gt 0 ]]; then
-    debug "script args: ${SCRIPT_ARGS[*]}"
+    verbose_log "script args: ${SCRIPT_ARGS[*]}"
   fi
 
   case "$SUBCOMMAND" in
@@ -262,7 +313,7 @@ main() {
   esac
 
   if [[ "$AUTO_CLEAN" == "0" ]]; then
-    info "temporary directory kept at: $WORK_DIR"
+    verbose_log "temporary directory kept at: $WORK_DIR"
   fi
 }
 

@@ -2,8 +2,60 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-# shellcheck source=_lib/common.sh
-source "$SCRIPT_DIR/_lib/common.sh"
+
+resolve_from_cwd() {
+  local raw_path="$1"
+  local normalized_path="$raw_path"
+  local drive_letter
+
+  if [[ "$raw_path" = /* ]]; then
+    realpath -m "$raw_path"
+    return
+  fi
+
+  if [[ "$raw_path" =~ ^[A-Za-z]:[\\/] ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      normalized_path="$(cygpath -u "$raw_path")"
+    else
+      drive_letter="${raw_path:0:1}"
+      drive_letter="${drive_letter,}"
+      normalized_path="/$drive_letter/${raw_path:2}"
+      normalized_path="${normalized_path//\\//}"
+    fi
+    realpath -m "$normalized_path"
+    return
+  fi
+
+  if [[ ( "${OSTYPE:-}" == msys* || "${OSTYPE:-}" == cygwin* || "${OSTYPE:-}" == win32* ) && "$raw_path" == *\\* ]]; then
+    normalized_path="${raw_path//\\//}"
+  fi
+
+  realpath -m "$PWD/$normalized_path"
+}
+
+verbose_log() {
+  if [[ "${SCRIPT_VERBOSE:-0}" = "1" ]]; then
+    printf '%s\n' "$*" >&2
+  fi
+}
+
+warn() {
+  printf 'warning: %s\n' "$*" >&2
+}
+
+error() {
+  printf 'error: %s\n' "$*" >&2
+}
+
+die() {
+  error "$@"
+  exit 1
+}
+
+require_cmd() {
+  local command_name="$1"
+  command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"
+}
 
 usage() {
   cat <<'EOF'
@@ -17,7 +69,7 @@ Optional inputs:
   --target           all | opencode | claude, used by init|clean, auto-detect when omitted
   --version          npm package version, used by install, defaults to latest
   --project-dir      target project directory for init|clean when --scope project
-  --verbose          print debug logs
+  --verbose          print process information
   --help             show this message
 
 Default behavior:
@@ -209,7 +261,7 @@ install_cli() {
   local package_spec="$1"
 
   require_cmd npm
-  info "installing $package_spec globally"
+  verbose_log "installing $package_spec globally"
   npm install -g "$package_spec"
   playwright_cli_cmd="$(global_bin_dir)/playwright-cli"
   [[ -x "$playwright_cli_cmd" ]] || die "playwright-cli executable not found: $playwright_cli_cmd"
@@ -233,7 +285,7 @@ uninstall_cli() {
   require_cmd npm
 
   if npm ls -g @playwright/cli --depth=0 >/dev/null 2>&1; then
-    info "uninstalling @playwright/cli globally"
+    verbose_log "uninstalling @playwright/cli globally"
     npm uninstall -g @playwright/cli
   else
     warn "@playwright/cli is not installed globally"
@@ -254,7 +306,7 @@ install_playwright_workspace() {
   mkdir -p "$(dirname "$target_dir")"
   rm -rf "$target_dir"
   cp -a "$source_dir" "$target_dir"
-  info "installed Playwright workspace to $target_dir"
+  verbose_log "installed Playwright workspace to $target_dir"
 }
 
 uninstall_playwright_workspace() {
@@ -312,7 +364,7 @@ install_skills_to_dir() {
     cp -a "$source_dir/$item_name" "$target_dir/"
   done
   write_manifest "$manifest_path" "${skill_items[@]}"
-  info "installed skills to $target_dir"
+  verbose_log "installed skills to $target_dir"
 }
 
 install_named_target_skills() {
@@ -343,7 +395,7 @@ run_skill_installer() {
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf '"'"$tmp_dir"'"'' EXIT
 
-  info "installing skills into temporary directory $tmp_dir"
+  verbose_log "installing skills into temporary directory $tmp_dir"
   bash -lc 'cd "$1" && "$2" install --skills' -- "$tmp_dir" "$playwright_cli_cmd"
 
   skill_dir="$tmp_dir/.claude/skills"
@@ -400,7 +452,7 @@ resolve_playwright_bundled_cli() {
 
 ensure_sudo_session() {
   require_cmd sudo
-  info "requesting sudo credentials for Playwright dependency installation"
+  verbose_log "requesting sudo credentials for Playwright dependency installation"
 
   if [[ -t 0 ]]; then
     sudo -v
@@ -416,7 +468,7 @@ install_playwright_artifacts() {
     die "Playwright bundled CLI not found after installing @playwright/cli"
   fi
 
-  info "installing Playwright artifacts for current @playwright/cli installation"
+  verbose_log "installing Playwright artifacts for current @playwright/cli installation"
   node "$bundled_cli" install chromium
 }
 
@@ -430,7 +482,7 @@ install_playwright_deps() {
   current_node_cmd="$(command -v node)"
   [[ -n "$current_node_cmd" ]] || die "missing command: node"
 
-  info "installing Playwright system dependencies"
+  verbose_log "installing Playwright system dependencies"
   ensure_sudo_session
   sudo "$current_node_cmd" "$bundled_cli" install-deps
 }
@@ -443,7 +495,7 @@ uninstall_playwright_artifacts() {
     return
   fi
 
-  info "removing Playwright artifacts for current @playwright/cli installation"
+  verbose_log "removing Playwright artifacts for current @playwright/cli installation"
   node "$bundled_cli" uninstall
 }
 
@@ -471,7 +523,7 @@ uninstall_named_target_skills() {
 
   rm -f "$manifest_path"
   cleanup_dir_if_empty "$target_dir"
-  info "removed skills from $target_dir"
+  verbose_log "removed skills from $target_dir"
 }
 
 uninstall_target_skills() {
