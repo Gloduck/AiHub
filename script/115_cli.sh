@@ -29,6 +29,7 @@ RAW_RESPONSE=0
 OUTPUT_JSON=0
 COOKIE="${PAN115_COOKIE:-}"
 TMP_DIR=""
+readonly JQ_HUMAN_SIZE='def human_size: (tonumber? // 0) as $n | if $n >= 1099511627776 then (($n / 1099511627776 * 100 | round / 100)|tostring) + " TB" elif $n >= 1073741824 then (($n / 1073741824 * 100 | round / 100)|tostring) + " GB" elif $n >= 1048576 then (($n / 1048576 * 100 | round / 100)|tostring) + " MB" elif $n >= 1024 then (($n / 1024 * 100 | round / 100)|tostring) + " KB" else ($n|tostring) + " B" end;'
 
 usage() {
   cat <<'EOF'
@@ -360,13 +361,13 @@ friendly_output() {
       printf '%s\n' "$response" | jq -r 'if (.state == true) then "Added offline task: " + ((.info_hash // .result[0].info_hash // .result[0] // "unknown")|tostring) + (if .name then " (" + .name + ")" else "" end) else "Add failed: " + (.error // .message // "unknown error") end'
       ;;
     offline-list)
-      printf '%s\n' "$response" | jq -r 'if (.state == false) then "List failed: " + (.error // .message // "unknown error") elif ((.tasks // [])|length) == 0 then "Offline tasks: none" else "Offline tasks:" end, ((.tasks // [])[] | "- " + ((.info_hash // "")|tostring) + "  " + ((.name // .url // "")|tostring) + "  " + ((.percentDone // .percent // 0)|tostring) + "%")'
+      printf '%s\n' "$response" | jq -r "$JQ_HUMAN_SIZE"' if (.state == false) then "List failed: " + (.error // .message // "unknown error") elif ((.tasks // [])|length) == 0 then "Offline tasks: none" else "Offline tasks:" end, ((.tasks // [])[] | "- " + ((.info_hash // "")|tostring) + "  " + ((.name // .url // "")|tostring) + "  " + ((.size // 0)|human_size) + "  " + ((.percentDone // .percent // 0)|tostring) + "%")'
       ;;
     ls|search)
-      printf '%s\n' "$response" | jq -r 'if (.state == false) then "List failed: " + (.error // .message // "unknown error") elif ((.data // [])|length) == 0 then "No items" else (.data[] | (if (.fid // "") == "" then "[D] " else "[F] " end) + (.n // .name // "") + "  id=" + ((.fid // .cid // "")|tostring) + (if (.s // "") != "" then "  size=" + ((.s)|tostring) else "" end)) end'
+      printf '%s\n' "$response" | jq -r "$JQ_HUMAN_SIZE"' if (.state == false) then "List failed: " + (.error // .message // "unknown error") elif ((.data // [])|length) == 0 then "No items" else (.data[] | (if (.fid // "") == "" then "[D] " else "[F] " end) + (.n // .name // "") + "  id=" + ((.fid // .cid // "")|tostring) + (if (.s // "") != "" then "  size=" + ((.s)|human_size) else "" end)) end'
       ;;
     info)
-      printf '%s\n' "$response" | jq -r 'if (.state == false) then "Info failed: " + (.error // .message // "unknown error") else (.data.files[0] // .data[0] // .files[0] // .) as $f | "Name: " + (($f.n // $f.file_name // $f.name // "")|tostring) + "\nID: " + (($f.fid // $f.cid // $f.file_id // "")|tostring) + "\nPickCode: " + (($f.pc // $f.pick_code // "")|tostring) + "\nSHA1: " + (($f.sha // $f.sha1 // "")|tostring) end'
+      printf '%s\n' "$response" | jq -r "$JQ_HUMAN_SIZE"' if (.state == false) then "Info failed: " + (.error // .message // "unknown error") else (.data.files[0] // .data[0] // .files[0] // .) as $f | "Name: " + (($f.n // $f.file_name // $f.name // "")|tostring) + "\nID: " + (($f.fid // $f.cid // $f.file_id // "")|tostring) + "\nSize: " + (($f.s // $f.file_size // 0)|human_size) + "\nPickCode: " + (($f.pc // $f.pick_code // "")|tostring) + "\nSHA1: " + (($f.sha // $f.sha1 // "")|tostring) end'
       ;;
     upload)
       printf '%s\n' "$response" | jq -r 'if (.state == true) then "Upload: ok (mode=" + (if .rapid_upload == true then "rapid_upload" else (.upload_mode // "unknown") end) + ")" else "Upload failed: " + (.error // .message // (.oss_result.message // "unknown error")) end'
