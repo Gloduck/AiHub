@@ -22,8 +22,8 @@ Default env.ini lookup order when --file is omitted:
 
 Supported file format:
   - one KEY=VALUE entry per line
-  - each line must contain exactly one =
-  - value is loaded as-is
+  - key is the text before the first =
+  - value is loaded as-is and may contain =
 
 Notes:
   This script must be sourced, otherwise exported variables only affect a child shell.
@@ -86,7 +86,7 @@ load_env_file() {
     line="${line%$'\r'}"
 
     [[ -z "$line" ]] && continue
-    if [[ "$line" != *=* || "${line#*=}" == *"="* ]]; then
+    if [[ "$line" != *=* ]]; then
       error "invalid line in env file: $line"
       return 1
     fi

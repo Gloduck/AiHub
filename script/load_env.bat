@@ -73,8 +73,8 @@ echo   2. current working directory\env.ini
 echo.
 echo Supported file format:
 echo   - one KEY=VALUE entry per line
-echo   - each line must contain exactly one =
-echo   - value is loaded as-is
+echo   - key is the text before the first =
+echo   - value is loaded as-is and may contain =
 echo.
 echo Notes:
 echo   Use this script in cmd.exe. If called from another batch file, use: call load_env.bat
@@ -111,12 +111,6 @@ if not defined KEY (
 )
 
 if "%LINE%"=="%KEY%" if not "%LINE:~-1%"=="=" (
-  echo error: invalid line in env file: %LINE% 1>&2
-  exit /b 1
-)
-
-echo(%VALUE%| findstr "=" >nul
-if not errorlevel 1 (
   echo error: invalid line in env file: %LINE% 1>&2
   exit /b 1
 )
