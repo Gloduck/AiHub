@@ -29,6 +29,7 @@ RAW_RESPONSE=0
 OUTPUT_JSON=0
 COOKIE="${PAN115_COOKIE:-}"
 TMP_DIR=""
+OUTPUT_CONTEXT='{}'
 readonly JQ_HUMAN_SIZE='def human_size: (tonumber? // 0) as $n | if $n >= 1099511627776 then (($n / 1099511627776 * 100 | round / 100)|tostring) + " TB" elif $n >= 1073741824 then (($n / 1073741824 * 100 | round / 100)|tostring) + " GB" elif $n >= 1048576 then (($n / 1048576 * 100 | round / 100)|tostring) + " MB" elif $n >= 1024 then (($n / 1024 * 100 | round / 100)|tostring) + " KB" else ($n|tostring) + " B" end;'
 
 usage() {
@@ -83,7 +84,7 @@ Optional inputs:
   --limit N              ls/search: page size; default 100
   --multipart-threshold   upload multipart threshold in bytes; default 10485760
   --part-size BYTES       upload multipart part size in bytes; default 10485760
-  --json                  output JSON like the underlying API response
+  --json                  output simplified, standardized JSON
   --raw-response          print raw API response without formatting
   --all                   search only: fetch all de-duplicated results
   --verbose               print process information to stderr
@@ -341,10 +342,130 @@ api_check_or_print() {
   if [[ "$RAW_RESPONSE" == "1" ]]; then
     printf '%s\n' "$response"
   elif [[ "$OUTPUT_JSON" == "1" ]]; then
-    printf '%s\n' "$response" | jq .
+    standardized_json "$kind" "$response"
   else
     friendly_output "$kind" "$response"
   fi
+  OUTPUT_CONTEXT='{}'
+}
+
+json_array_from_args() {
+  printf '%s\n' "$@" | jq -R . | jq -s .
+}
+
+standardized_json() {
+  local kind="$1"
+  local response="$2"
+  local command="$kind"
+  case "$kind" in
+    login) command="login-check" ;;
+    offline-list) command="list" ;;
+    delete-task) command="delete" ;;
+  esac
+  printf '%s\n' "$response" | jq --arg command "$command" --argjson ctx "$OUTPUT_CONTEXT" "$JQ_HUMAN_SIZE"'
+    def ok:
+      (.state == true) or (.state == 1) or (.state == "1") or
+      ((.state | type) == "number" and .state != 0) or
+      (((.errno // .errNo // 0) | tonumber? // 0) == 0 and (.state != false));
+    def msg: (.error // .error_msg // .message // .msg // .statusmsg // "ok") | tostring;
+    def code: (.errno // .errNo // .statuscode // .code // 0);
+    def status_name($v):
+      ($v | tonumber? // 999999) as $s |
+      if $s == 0 then "pending"
+      elif $s == 1 then "downloading"
+      elif $s == 2 then "completed"
+      elif $s == -1 then "failed"
+      else "unknown" end;
+    def readable_time($v):
+      ($v | tonumber? // null) as $t |
+      if $t == null or $t <= 0 then ""
+      elif $t > 9999999999 then ($t / 1000 | strftime("%Y-%m-%d %H:%M:%S"))
+      else ($t | strftime("%Y-%m-%d %H:%M:%S")) end;
+    def item_type($x): if (($x.fid // $x.file_id // "") | tostring) != "" then "file" else "folder" end;
+    def item($x):
+      {
+        type: item_type($x),
+        id: (($x.fid // $x.cid // $x.file_id // $x.id // "") | tostring),
+        parent_id: (($x.pid // $x.parent_id // $x.cid // "") | tostring),
+        name: (($x.n // $x.file_name // $x.name // "") | tostring),
+        updated_at: readable_time($x.t // $x.user_ptime // $x.update_time // $x.updated_at // null)
+      }
+      + (if item_type($x) == "file" then {
+          size: (($x.s // $x.file_size // $x.size // 0) | tonumber? // 0),
+          size_readable: (($x.s // $x.file_size // $x.size // 0) | human_size),
+          pick_code: (($x.pc // $x.pick_code // $x.pickcode // "") | tostring),
+          sha1: (($x.sha // $x.sha1 // "") | tostring)
+        } else {} end);
+    def task($x):
+      ($x.status // $x.status_code // $x.state // $x.flag // null) as $status |
+      {
+        info_hash: (($x.info_hash // $x.hash // "") | tostring),
+        name: (($x.name // $x.file_name // $x.title // "") | tostring),
+        url: (($x.url // $x.url_original // "") | tostring),
+        status: status_name($status),
+        status_code: ($status // null),
+        progress: (($x.percentDone // $x.percent // $x.progress // 0) | tonumber? // 0),
+        size: (($x.size // $x.file_size // 0) | tonumber? // 0),
+        size_readable: (($x.size // $x.file_size // 0) | human_size),
+        dir_id: (($x.wp_path_id // $x.dir_id // $x.cid // "") | tostring),
+        file_id: (($x.file_id // $x.fid // "") | tostring)
+      };
+    if $command == "version" then
+      {success:true, command:$command, version:(.version // "")}
+    elif $command == "login-check" then
+      ((ok or .state == 0 or .state == "0") as $login_ok |
+      {success:$login_ok, command:$command, user_id:(.data.user_id // .user_id // null), message:(if $login_ok then "login ok" else msg end)})
+    elif $command == "add" then
+      ((ok or (((.errno // 1) | tonumber? // 1) == 0 and ((.info_hash // .hash // "") | tostring) != "")) as $add_ok |
+      {success:$add_ok, command:$command, dir:$ctx.dir}
+      + (if (.result | type) == "array" then {tasks:(.result | map(if type == "object" then {url:(.url // ""), info_hash:(.info_hash // .hash // ""), name:(.name // .file_name // "")} else {url:"", info_hash:(.|tostring), name:""} end))}
+         else {url:($ctx.urls[0] // .url // ""), info_hash:(.info_hash // .hash // ""), name:(.name // .file_name // "")} end)
+      + (if $add_ok then (if (.state == false) then {message:msg} else {} end) else {message:msg, code:code} end))
+    elif $command == "list" then
+      {success:ok, command:$command, page:($ctx.page // (.page // 0)), total:(.count // .total // ((.tasks // []) | length)), tasks:((.tasks // []) | map(task(.)))}
+      + (if ok then {} else {message:msg, code:code} end)
+    elif $command == "delete" then
+      {success:ok, command:$command, hashes:($ctx.hashes // []), delete_files:(($ctx.delete_files // false) == true), message:(if ok then "deleted" else msg end)}
+      + (if ok then {} else {code:code} end)
+    elif $command == "clear" then
+      {success:ok, command:$command, flag:($ctx.flag // 0), message:(if ok then "cleared" else msg end)}
+      + (if ok then {} else {code:code} end)
+    elif $command == "mkdir" then
+      {success:ok, command:$command, path:$ctx.path, id:((.cid // .file_id // .id // "") | tostring), name:($ctx.name // .name // "")}
+      + (if ok then {} else {message:msg, code:code} end)
+    elif $command == "ls" then
+      {success:ok, command:$command, path:$ctx.path, offset:($ctx.offset // (.offset // 0)), limit:($ctx.limit // 100), total:(.count // .file_count // ((.data // []) | length)), items:((.data // []) | map(item(.)))}
+      + (if ok then {} else {message:msg, code:code} end)
+    elif $command == "info" then
+      (if (.data | type) == "array" then .data[0]
+       elif (.data | type) == "object" then (.data.files[0] // .data)
+       elif (.files | type) == "array" then .files[0]
+       else . end) as $f |
+      ({success:ok, command:$command, path:$ctx.path} + item($f) + {created_at:readable_time($f.tp // $f.created_at // null)})
+      + (if ok then {} else {message:msg, code:code} end)
+    elif $command == "search" then
+      {success:ok, command:$command, dir:$ctx.dir, keyword:$ctx.keyword, offset:($ctx.offset // (.offset // 0)), limit:($ctx.limit // 100), total:(.count // .file_count // ((.data // []) | length)), items:((.data // []) | map(item(.)))}
+      + (if ok then {} else {message:msg, code:code} end)
+    elif $command == "rm" then
+      {success:ok, command:$command, paths:($ctx.paths // []), message:(if ok then "deleted" else msg end)}
+      + (if ok then {} else {code:code} end)
+    elif $command == "mv" or $command == "cp" then
+      {success:ok, command:$command, paths:($ctx.paths // []), target_dir:$ctx.target_dir, message:(if ok then (if $command == "mv" then "moved" else "copied" end) else msg end)}
+      + (if ok then {} else {code:code} end)
+    elif $command == "rename" then
+      {success:ok, command:$command, path:$ctx.path, new_name:$ctx.new_name, message:(if ok then "renamed" else msg end)}
+      + (if ok then {} else {code:code} end)
+    elif $command == "upload" then
+      ((.initupload // {}) as $i | (.oss_result // {}) as $o |
+      {success:ok, command:$command, dir:$ctx.dir, local_file:$ctx.local_file, name:($ctx.name // $i.file_name // ""), mode:(if .rapid_upload == true then "rapid_upload" else (.upload_mode // "unknown") end), file:{id:(($o.file_id // $i.file_id // "") | tostring), parent_id:(($ctx.dir_id // "") | tostring), name:($ctx.name // $o.file_name // ""), size:(($ctx.size // $i.filesize // 0) | tonumber? // 0), size_readable:(($ctx.size // $i.filesize // 0) | human_size), pick_code:(($o.pick_code // $o.pickcode // "") | tostring), sha1:(($i.sha1 // "") | tostring)}})
+      + (if ok then {} else {message:msg, code:code} end)
+    elif $command == "download" then
+      {success:ok, command:$command, path:(.path // $ctx.path), output:(.output // ""), name:(.name // ""), size:(($ctx.size // .size // 0) | tonumber? // 0), size_readable:(($ctx.size // .size // 0) | human_size)}
+      + (if ok then {} else {message:msg, code:code} end)
+    else
+      {success:ok, command:$command, message:(if ok then "ok" else msg end)} + (if ok then {} else {code:code} end)
+    end
+  '
 }
 
 friendly_output() {
@@ -358,7 +479,7 @@ friendly_output() {
       printf '%s\n' "$response" | jq -r 'if ((.state // 1) == 0 or (.state == true)) then "Login: ok (user_id=" + ((.data.user_id // .user_id // "unknown")|tostring) + ")" else "Login: failed - " + (.error // .message // "unknown error") end'
       ;;
     add)
-      printf '%s\n' "$response" | jq -r 'if (.state == true) then "Added offline task: " + ((.info_hash // .result[0].info_hash // .result[0] // "unknown")|tostring) + (if .name then " (" + .name + ")" else "" end) else "Add failed: " + (.error // .message // "unknown error") end'
+      printf '%s\n' "$response" | jq -r 'if (.state == true) then "Add offline task: ok\nInfoHash: " + ((.info_hash // .result[0].info_hash // .result[0] // "unknown")|tostring) + (if (.name // .result[0].name // "") != "" then "\nName: " + ((.name // .result[0].name)|tostring) else "" end) else "Add failed: " + (.error // .message // "unknown error") end'
       ;;
     offline-list)
       printf '%s\n' "$response" | jq -r "$JQ_HUMAN_SIZE"' if (.state == false) then "List failed: " + (.error // .message // "unknown error") elif ((.tasks // [])|length) == 0 then "Offline tasks: none" else "Offline tasks:" end, ((.tasks // [])[] | "- " + ((.info_hash // "")|tostring) + "  " + ((.name // .url // "")|tostring) + "  " + ((.size // 0)|human_size) + "  " + ((.percentDone // .percent // 0)|tostring) + "%")'
@@ -367,13 +488,13 @@ friendly_output() {
       printf '%s\n' "$response" | jq -r "$JQ_HUMAN_SIZE"' if (.state == false) then "List failed: " + (.error // .message // "unknown error") elif ((.data // [])|length) == 0 then "No items" else (.data[] | (if (.fid // "") == "" then "[D] " else "[F] " end) + (.n // .name // "") + "  id=" + ((.fid // .cid // "")|tostring) + (if (.s // "") != "" then "  size=" + ((.s)|human_size) else "" end)) end'
       ;;
     info)
-      printf '%s\n' "$response" | jq -r "$JQ_HUMAN_SIZE"' if (.state == false) then "Info failed: " + (.error // .message // "unknown error") else (.data.files[0] // .data[0] // .files[0] // .) as $f | "Name: " + (($f.n // $f.file_name // $f.name // "")|tostring) + "\nID: " + (($f.fid // $f.cid // $f.file_id // "")|tostring) + "\nSize: " + (($f.s // $f.file_size // 0)|human_size) + "\nPickCode: " + (($f.pc // $f.pick_code // "")|tostring) + "\nSHA1: " + (($f.sha // $f.sha1 // "")|tostring) end'
+      printf '%s\n' "$response" | jq -r "$JQ_HUMAN_SIZE"' if (.state == false) then "Info failed: " + (.error // .message // "unknown error") else (if (.data | type) == "array" then .data[0] elif (.data | type) == "object" then (.data.files[0] // .data) elif (.files | type) == "array" then .files[0] else . end) as $f | "Name: " + (($f.n // $f.file_name // $f.name // "")|tostring) + "\nID: " + (($f.fid // $f.cid // $f.file_id // "")|tostring) + "\nSize: " + (($f.s // $f.file_size // 0)|human_size) + "\nPickCode: " + (($f.pc // $f.pick_code // "")|tostring) + "\nSHA1: " + (($f.sha // $f.sha1 // "")|tostring) end'
       ;;
     upload)
-      printf '%s\n' "$response" | jq -r 'if (.state == true) then "Upload: ok (mode=" + (if .rapid_upload == true then "rapid_upload" else (.upload_mode // "unknown") end) + ")" else "Upload failed: " + (.error // .message // (.oss_result.message // "unknown error")) end'
+      standardized_json upload "$response" | jq -r 'if .success then "Upload: ok\nFile: " + (.name // .file.name // "") + "\nSize: " + (.file.size_readable // "0 B") + "\nMode: " + (.mode // "unknown") else "Upload failed: " + (.message // "unknown error") end'
       ;;
     download)
-      printf '%s\n' "$response" | jq -r 'if (.state == true) then "Download: ok -> " + (.output // "") else "Download failed: " + (.error // .message // "unknown error") end'
+      standardized_json download "$response" | jq -r 'if .success then "Download: ok\nOutput: " + (.output // "") + "\nSize: " + (.size_readable // "0 B") else "Download failed: " + (.message // "unknown error") end'
       ;;
     *)
       printf '%s\n' "$response" | jq -r 'if (.state == true or (.errno // 0) == 0 or (.errNo // 0) == 0) then "Success" else "Failed: " + (.error // .message // .msg // "unknown error") end'
@@ -634,6 +755,7 @@ cmd_add() {
     -H 'Referer: https://115.com/?tab=offline&mode=wangpan' \
     "${post_args[@]}" \
     "$api_url")"
+  OUTPUT_CONTEXT="$(jq -cn --arg dir "$(normalize_cloud_path "$dir_path")" --argjson urls "$(json_array_from_args "${urls[@]}")" '{dir:$dir,urls:$urls}')"
   api_check_or_print "$response" add
 }
 
@@ -653,6 +775,7 @@ cmd_list() {
     esac
   done
   require_cookie
+  OUTPUT_CONTEXT="$(jq -cn --argjson page "$page" '{page:$page}')"
   api_check_or_print "$(cookie_curl -X POST -H 'Content-Type: application/json;charset=UTF-8' "${API_LIST_OFFLINE}&page=${page}")" offline-list
 }
 
@@ -684,6 +807,7 @@ cmd_delete() {
     curl_args+=(--data-urlencode "hash=${hash}")
   done
   curl_args+=(--data-urlencode "flag=${flag}")
+  OUTPUT_CONTEXT="$(jq -cn --argjson hashes "$(json_array_from_args "${hashes[@]}")" --argjson delete_files "$([[ "$flag" == "1" ]] && printf true || printf false)" '{hashes:$hashes,delete_files:$delete_files}')"
   api_check_or_print "$(cookie_curl -X POST -H 'Content-Type: application/json;charset=UTF-8' "${curl_args[@]}" "$API_DELETE_OFFLINE")" delete-task
 }
 
@@ -703,6 +827,7 @@ cmd_clear() {
     esac
   done
   require_cookie
+  OUTPUT_CONTEXT="$(jq -cn --argjson flag "$flag" '{flag:$flag}')"
   api_check_or_print "$(cookie_curl -X POST -H 'Content-Type: application/json;charset=UTF-8' --data-urlencode "flag=${flag}" "$API_CLEAR_OFFLINE")" clear
 }
 
@@ -733,6 +858,7 @@ cmd_mkdir() {
   name="$(cloud_basename "$dir_path")"
   parent_id="$(dir_id_by_path "$parent")"
   response="$(cookie_curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "pid=${parent_id}" --data-urlencode "cname=${name}" "$API_DIR_ADD")"
+  OUTPUT_CONTEXT="$(jq -cn --arg path "$dir_path" --arg name "$name" '{path:$path,name:$name}')"
   api_check_or_print "$response" mkdir
 }
 
@@ -766,9 +892,11 @@ cmd_ls() {
     esac
   done
   require_cookie
+  dir_path="$(normalize_cloud_path "$dir_path")"
   dir_id="$(dir_id_by_path "$dir_path")"
   response="$(list_dir_by_id "$dir_id" "$offset" "$limit")"
   response="$(normalize_paged_response "$response" "$offset")"
+  OUTPUT_CONTEXT="$(jq -cn --arg path "$dir_path" --argjson offset "$offset" --argjson limit "$limit" '{path:$path,offset:$offset,limit:$limit}')"
   api_check_or_print "$response" ls
 }
 
@@ -791,8 +919,10 @@ cmd_info() {
   done
   require_cookie
   [[ -n "$path" ]] || die "info requires --path absolute path"
+  path="$(normalize_cloud_path "$path")"
   object_id="$(object_id_by_path "$path")"
   response="$(cookie_curl --get --data-urlencode "file_id=${object_id}" "$API_FILE_INFO")"
+  OUTPUT_CONTEXT="$(jq -cn --arg path "$path" '{path:$path}')"
   api_check_or_print "$response" info
 }
 
@@ -848,6 +978,7 @@ cmd_search() {
   done
   require_cookie
   [[ -n "$keyword" ]] || die "search requires --keyword"
+  dir_path="$(normalize_cloud_path "$dir_path")"
   dir_id="$(dir_id_by_path "$dir_path")"
   if [[ "$fetch_all" == "0" ]]; then
     response="$(search_by_id "$dir_id" "$keyword" "$offset" "$limit" "$type")"
@@ -882,6 +1013,7 @@ cmd_search() {
         }
     ')"
   fi
+  OUTPUT_CONTEXT="$(jq -cn --arg dir "$dir_path" --arg keyword "$keyword" --argjson offset "$offset" --argjson limit "$limit" '{dir:$dir,keyword:$keyword,offset:$offset,limit:$limit}')"
   api_check_or_print "$response" search
 }
 
@@ -914,6 +1046,7 @@ cmd_rm() {
     index=$((index + 1))
   done
   response="$(cookie_curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' "${args[@]}" "$API_FILE_DELETE")"
+  OUTPUT_CONTEXT="$(jq -cn --argjson paths "$(json_array_from_args "${paths[@]}")" '{paths:$paths}')"
   api_check_or_print "$response" rm
 }
 
@@ -964,6 +1097,7 @@ cmd_mv_or_cp() {
     api_url="$API_FILE_COPY"
   fi
   response="$(cookie_curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' "${args[@]}" "$api_url")"
+  OUTPUT_CONTEXT="$(jq -cn --arg target_dir "$(normalize_cloud_path "$target_dir")" --argjson paths "$(json_array_from_args "${paths[@]}")" '{paths:$paths,target_dir:$target_dir}')"
   api_check_or_print "$response" "$mode"
 }
 
@@ -1000,6 +1134,7 @@ cmd_rename() {
     --data-urlencode "file_name=${new_name}" \
     --data-urlencode "files_new_name[${object_id}]=${new_name}" \
     "$API_FILE_RENAME")"
+  OUTPUT_CONTEXT="$(jq -cn --arg path "$(normalize_cloud_path "$path")" --arg new_name "$new_name" '{path:$path,new_name:$new_name}')"
   api_check_or_print "$response" rename
 }
 
@@ -1013,6 +1148,7 @@ cmd_upload() {
   local app_ver
   local py_bin=""
   local upload_response
+  local local_size
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dir)
@@ -1057,6 +1193,8 @@ cmd_upload() {
   else
     die "upload requires python3 or python"
   fi
+  [[ -n "$file_name" ]] || file_name="$(basename "$file_path")"
+  local_size="$(wc -c <"$file_path" | tr -d ' ')"
   dir_id="$(dir_id_by_path "$dir_path")"
   app_ver="$(resolve_app_ver)"
   upload_response="$(PAN115_UPLOAD_COOKIE="$COOKIE" \
@@ -1577,6 +1715,7 @@ except Exception:
 print(json.dumps({"state": True, "rapid_upload": False, "upload_mode": upload_mode, "oss_result": result, "initupload": init}, ensure_ascii=False))
 PY
 )"
+  OUTPUT_CONTEXT="$(jq -cn --arg dir "$(normalize_cloud_path "$dir_path")" --arg dir_id "$dir_id" --arg local_file "$file_path" --arg name "$file_name" --argjson size "$local_size" '{dir:$dir,dir_id:$dir_id,local_file:$local_file,name:$name,size:$size}')"
   api_check_or_print "$upload_response" upload
 }
 
@@ -1591,6 +1730,7 @@ cmd_download() {
   local response
   local url
   local final_output
+  local size
   local download_cookie_jar="$TMP_DIR/download_cookies.txt"
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1618,6 +1758,7 @@ cmd_download() {
   info_response="$(cookie_curl --get --data-urlencode "file_id=${object_id}" "$API_FILE_INFO")"
   pick_code="$(printf '%s\n' "$info_response" | jq -r '.data[0].pick_code // .data[0].pc // .data.files[0].pick_code // .data.files[0].pc // .files[0].pick_code // .files[0].pc // empty')"
   name="$(printf '%s\n' "$object" | jq -r '.n // .name // empty')"
+  size="$(printf '%s\n' "$object" | jq -r '.s // .file_size // .size // 0')"
   [[ -n "$pick_code" && "$pick_code" != "null" ]] || die "cloud path is not a downloadable file or has no pickcode: $cloud_path"
   if [[ -z "$output_path" ]]; then
     output_path="$name"
@@ -1636,6 +1777,7 @@ cmd_download() {
     -o "$output_path" \
     "$url" >/dev/null 2>&1
   final_output="$(realpath -m "$output_path" 2>/dev/null || printf '%s' "$output_path")"
+  OUTPUT_CONTEXT="$(jq -cn --arg path "$(normalize_cloud_path "$cloud_path")" --argjson size "$size" '{path:$path,size:$size}')"
   api_check_or_print "$(jq -cn --arg output "$final_output" --arg path "$cloud_path" --arg name "$name" '{state:true,path:$path,name:$name,output:$output}')" download
 }
 
