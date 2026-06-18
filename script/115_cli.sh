@@ -25,9 +25,8 @@ readonly DEFAULT_APP_VER="35.6.0.3"
 
 SCRIPT_VERBOSE=0
 RAW_RESPONSE=0
+OUTPUT_JSON=0
 COOKIE="${PAN115_COOKIE:-}"
-UID_VALUE=""
-APP_VER=""
 TMP_DIR=""
 
 usage() {
@@ -58,6 +57,7 @@ Commands:
 
 Required inputs:
   --cookie VALUE          115 cookie, usually UID=...;CID=...;SEID=...;KID=...
+                          Can also be provided by PAN115_COOKIE.
 
 Command-specific inputs:
   add --dir PATH --url URL [--url URL ...]
@@ -75,11 +75,10 @@ Command-specific inputs:
   upload --dir PATH --file LOCAL_PATH [--name FILE_NAME] [--multipart-threshold BYTES] [--part-size BYTES]
 
 Optional inputs:
-  --uid VALUE             115 user id; add auto-fetches it from login-check when omitted
-  --app-ver VALUE         app version for add; default tries version API, then 35.6.0.3
   --multipart-threshold   upload multipart threshold in bytes; default 10485760
   --part-size BYTES       upload multipart part size in bytes; default 10485760
-  --raw-response          print raw API response; add prints raw outer response instead of decoded data
+  --json                  output JSON like the underlying API response
+  --raw-response          print raw API response without formatting
   --verbose               print process information to stderr
   --help                  show this message
 
@@ -94,7 +93,8 @@ Default behavior:
   - upload uses rapid upload first, then OSS PutObject for small files or serial OSS Multipart above threshold.
   - Commands that accept cloud directories require absolute paths and convert them to 115 ids internally.
   - list/delete/clear call lixian APIs directly with the provided cookie.
-  - stdout is reserved for API JSON output; stderr is used for logs and errors.
+  - stdout prints human-friendly text by default; use --json for JSON output.
+  - stderr is used for logs and errors.
 
 Side effects:
   Sends HTTP requests to 115 private web/lixian APIs and may create/delete/clear offline tasks.
@@ -170,10 +170,6 @@ get_app_version() {
 
 resolve_app_ver() {
   local ver
-  if [[ -n "$APP_VER" ]]; then
-    printf '%s\n' "$APP_VER"
-    return
-  fi
   if ver="$(get_app_version 2>/dev/null)" && [[ -n "$ver" ]]; then
     printf '%s\n' "$ver"
     return
@@ -190,10 +186,6 @@ login_check_response() {
 resolve_uid() {
   local response
   local uid
-  if [[ -n "$UID_VALUE" ]]; then
-    printf '%s\n' "$UID_VALUE"
-    return
-  fi
   response="$(login_check_response)"
   uid="$(printf '%s\n' "$response" | jq -r '.data.user_id // .data.uid // .user_id // empty')"
   [[ -n "$uid" && "$uid" != "null" ]] || die "failed to resolve uid from login-check response"
@@ -299,11 +291,45 @@ object_id_by_path() {
 
 api_check_or_print() {
   local response="$1"
+  local kind="${2:-generic}"
   if [[ "$RAW_RESPONSE" == "1" ]]; then
     printf '%s\n' "$response"
-  else
+  elif [[ "$OUTPUT_JSON" == "1" ]]; then
     printf '%s\n' "$response" | jq .
+  else
+    friendly_output "$kind" "$response"
   fi
+}
+
+friendly_output() {
+  local kind="$1"
+  local response="$2"
+  case "$kind" in
+    version)
+      printf 'Version: %s\n' "$(printf '%s\n' "$response" | jq -r '.version // empty')"
+      ;;
+    login)
+      printf '%s\n' "$response" | jq -r 'if ((.state // 1) == 0 or (.state == true)) then "Login: ok (user_id=" + ((.data.user_id // .user_id // "unknown")|tostring) + ")" else "Login: failed - " + (.error // .message // "unknown error") end'
+      ;;
+    add)
+      printf '%s\n' "$response" | jq -r 'if (.state == true) then "Added offline task: " + ((.info_hash // .result[0].info_hash // .result[0] // "unknown")|tostring) + (if .name then " (" + .name + ")" else "" end) else "Add failed: " + (.error // .message // "unknown error") end'
+      ;;
+    offline-list)
+      printf '%s\n' "$response" | jq -r 'if (.state == false) then "List failed: " + (.error // .message // "unknown error") elif ((.tasks // [])|length) == 0 then "Offline tasks: none" else "Offline tasks:" end, ((.tasks // [])[] | "- " + ((.info_hash // "")|tostring) + "  " + ((.name // .url // "")|tostring) + "  " + ((.percentDone // .percent // 0)|tostring) + "%")'
+      ;;
+    ls|search)
+      printf '%s\n' "$response" | jq -r 'if (.state == false) then "List failed: " + (.error // .message // "unknown error") elif ((.data // [])|length) == 0 then "No items" else (.data[] | (if (.fid // "") == "" then "[D] " else "[F] " end) + (.n // .name // "") + "  id=" + ((.fid // .cid // "")|tostring) + (if (.s // "") != "" then "  size=" + ((.s)|tostring) else "" end)) end'
+      ;;
+    info)
+      printf '%s\n' "$response" | jq -r 'if (.state == false) then "Info failed: " + (.error // .message // "unknown error") else (.data.files[0] // .data[0] // .files[0] // .) as $f | "Name: " + (($f.n // $f.file_name // $f.name // "")|tostring) + "\nID: " + (($f.fid // $f.cid // $f.file_id // "")|tostring) + "\nPickCode: " + (($f.pc // $f.pick_code // "")|tostring) + "\nSHA1: " + (($f.sha // $f.sha1 // "")|tostring) end'
+      ;;
+    upload)
+      printf '%s\n' "$response" | jq -r 'if (.state == true) then "Upload: ok (mode=" + (if .rapid_upload == true then "rapid_upload" else (.upload_mode // "unknown") end) + ")" else "Upload failed: " + (.error // .message // (.oss_result.message // "unknown error")) end'
+      ;;
+    *)
+      printf '%s\n' "$response" | jq -r 'if (.state == true or (.errno // 0) == 0 or (.errNo // 0) == 0) then "Success" else "Failed: " + (.error // .message // .msg // "unknown error") end'
+      ;;
+  esac
 }
 
 bytes_to_hex() {
@@ -489,17 +515,17 @@ cmd_version() {
   local ver
   ver="$(get_app_version)" || die "failed to get app version"
   [[ -n "$ver" ]] || die "empty app version response"
-  jq -cn --arg version "$ver" '{version:$version}'
+  api_check_or_print "$(jq -cn --arg version "$ver" '{version:$version}')" version
 }
 
 cmd_login_check() {
   require_cookie
-  login_check_response
+  api_check_or_print "$(login_check_response)" login
 }
 
 cmd_add() {
-  local dir_id=""
   local dir_path=""
+  local dir_id=""
   local response
   local space_response
   local sign
@@ -511,11 +537,6 @@ cmd_add() {
   local -a urls=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --dir-id)
-        [[ $# -ge 2 ]] || die "missing value for --dir-id"
-        dir_id="$2"
-        shift 2
-        ;;
       --dir)
         [[ $# -ge 2 ]] || die "missing value for --dir"
         dir_path="$2"
@@ -533,9 +554,8 @@ cmd_add() {
     esac
   done
   require_cookie
-  if [[ -n "$dir_path" ]]; then
-    dir_id="$(dir_id_by_path "$dir_path")"
-  fi
+  [[ -n "$dir_path" ]] || die "add requires --dir absolute path"
+  dir_id="$(dir_id_by_path "$dir_path")"
   [[ -n "$dir_id" ]] || die "add requires --dir absolute path"
   [[ ${#urls[@]} -gt 0 ]] || die "add requires at least one --url"
   uid="$(resolve_uid)"
@@ -565,7 +585,7 @@ cmd_add() {
     -H 'Referer: https://115.com/?tab=offline&mode=wangpan' \
     "${post_args[@]}" \
     "$api_url")"
-  api_check_or_print "$response"
+  api_check_or_print "$response" add
 }
 
 cmd_list() {
@@ -584,7 +604,7 @@ cmd_list() {
     esac
   done
   require_cookie
-  cookie_curl -X POST -H 'Content-Type: application/json;charset=UTF-8' "${API_LIST_OFFLINE}&page=${page}" | jq .
+  api_check_or_print "$(cookie_curl -X POST -H 'Content-Type: application/json;charset=UTF-8' "${API_LIST_OFFLINE}&page=${page}")" offline-list
 }
 
 cmd_delete() {
@@ -615,7 +635,7 @@ cmd_delete() {
     curl_args+=(--data-urlencode "hash=${hash}")
   done
   curl_args+=(--data-urlencode "flag=${flag}")
-  cookie_curl -X POST -H 'Content-Type: application/json;charset=UTF-8' "${curl_args[@]}" "$API_DELETE_OFFLINE" | jq .
+  api_check_or_print "$(cookie_curl -X POST -H 'Content-Type: application/json;charset=UTF-8' "${curl_args[@]}" "$API_DELETE_OFFLINE")" delete-task
 }
 
 cmd_clear() {
@@ -634,7 +654,7 @@ cmd_clear() {
     esac
   done
   require_cookie
-  cookie_curl -X POST -H 'Content-Type: application/json;charset=UTF-8' --data-urlencode "flag=${flag}" "$API_CLEAR_OFFLINE" | jq .
+  api_check_or_print "$(cookie_curl -X POST -H 'Content-Type: application/json;charset=UTF-8' --data-urlencode "flag=${flag}" "$API_CLEAR_OFFLINE")" clear
 }
 
 cmd_mkdir() {
@@ -664,7 +684,7 @@ cmd_mkdir() {
   name="$(cloud_basename "$dir_path")"
   parent_id="$(dir_id_by_path "$parent")"
   response="$(cookie_curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "pid=${parent_id}" --data-urlencode "cname=${name}" "$API_DIR_ADD")"
-  api_check_or_print "$response"
+  api_check_or_print "$response" mkdir
 }
 
 cmd_ls() {
@@ -699,7 +719,7 @@ cmd_ls() {
   require_cookie
   dir_id="$(dir_id_by_path "$dir_path")"
   response="$(list_dir_by_id "$dir_id" "$offset" "$limit")"
-  api_check_or_print "$response"
+  api_check_or_print "$response" ls
 }
 
 cmd_info() {
@@ -723,7 +743,7 @@ cmd_info() {
   [[ -n "$path" ]] || die "info requires --path absolute path"
   object_id="$(object_id_by_path "$path")"
   response="$(cookie_curl --get --data-urlencode "file_id=${object_id}" "$API_FILE_INFO")"
-  api_check_or_print "$response"
+  api_check_or_print "$response" info
 }
 
 cmd_search() {
@@ -782,7 +802,7 @@ cmd_search() {
     --data-urlencode "o=file_name" \
     --data-urlencode "asc=1" \
     "$API_FILE_SEARCH")"
-  api_check_or_print "$response"
+  api_check_or_print "$response" search
 }
 
 cmd_rm() {
@@ -814,7 +834,7 @@ cmd_rm() {
     index=$((index + 1))
   done
   response="$(cookie_curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' "${args[@]}" "$API_FILE_DELETE")"
-  api_check_or_print "$response"
+  api_check_or_print "$response" rm
 }
 
 cmd_mv_or_cp() {
@@ -864,7 +884,7 @@ cmd_mv_or_cp() {
     api_url="$API_FILE_COPY"
   fi
   response="$(cookie_curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' "${args[@]}" "$api_url")"
-  api_check_or_print "$response"
+  api_check_or_print "$response" "$mode"
 }
 
 cmd_rename() {
@@ -900,7 +920,7 @@ cmd_rename() {
     --data-urlencode "file_name=${new_name}" \
     --data-urlencode "files_new_name[${object_id}]=${new_name}" \
     "$API_FILE_RENAME")"
-  api_check_or_print "$response"
+  api_check_or_print "$response" rename
 }
 
 cmd_upload() {
@@ -912,6 +932,7 @@ cmd_upload() {
   local dir_id
   local app_ver
   local py_bin=""
+  local upload_response
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dir)
@@ -958,7 +979,7 @@ cmd_upload() {
   fi
   dir_id="$(dir_id_by_path "$dir_path")"
   app_ver="$(resolve_app_ver)"
-  PAN115_UPLOAD_COOKIE="$COOKIE" \
+  upload_response="$(PAN115_UPLOAD_COOKIE="$COOKIE" \
   PAN115_UPLOAD_DIR_ID="$dir_id" \
   PAN115_UPLOAD_FILE="$file_path" \
   PAN115_UPLOAD_NAME="$file_name" \
@@ -1475,6 +1496,8 @@ except Exception:
     result = {"raw": body.decode(errors="replace")}
 print(json.dumps({"state": True, "rapid_upload": False, "upload_mode": upload_mode, "oss_result": result, "initupload": init}, ensure_ascii=False))
 PY
+)"
+  api_check_or_print "$upload_response" upload
 }
 
 PARSED_SHIFT=0
@@ -1485,18 +1508,12 @@ parse_common_option() {
       COOKIE="$2"
       PARSED_SHIFT=2
       ;;
-    --uid)
-      [[ $# -ge 2 ]] || die "missing value for --uid"
-      UID_VALUE="$2"
-      PARSED_SHIFT=2
-      ;;
-    --app-ver)
-      [[ $# -ge 2 ]] || die "missing value for --app-ver"
-      APP_VER="$2"
-      PARSED_SHIFT=2
-      ;;
     --raw-response)
       RAW_RESPONSE=1
+      PARSED_SHIFT=1
+      ;;
+    --json)
+      OUTPUT_JSON=1
       PARSED_SHIFT=1
       ;;
     --verbose)
@@ -1536,7 +1553,7 @@ main() {
         parse_common_option "$@"
         shift "$PARSED_SHIFT"
       done
-      cmd_login_check | jq .
+      cmd_login_check
       ;;
     add)
       cmd_add "$@"
