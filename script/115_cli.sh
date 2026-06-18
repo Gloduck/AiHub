@@ -248,6 +248,15 @@ dir_id_by_path() {
     printf '0\n'
     return
   fi
+
+  if response="$(cookie_curl --get --data-urlencode "path=${path}" "$API_DIR_ID" 2>/dev/null)"; then
+    cid="$(printf '%s\n' "$response" | jq -r '.id // .cid // .file_id // .category_id // .data.cid // .data.id // empty')"
+    if [[ -n "$cid" && "$cid" != "null" ]]; then
+      printf '%s\n' "$cid"
+      return
+    fi
+  fi
+
   IFS='/' read -r -a components <<<"${path#/}"
   for component in "${components[@]}"; do
     [[ -n "$component" ]] || continue
