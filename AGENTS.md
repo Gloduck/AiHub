@@ -10,7 +10,7 @@
 + 脚本开发脚本相关规范：`${AiHub Path}/rules/script_rule.md`
 
 ## 脚本执行
-
++ 在执行脚本之前，需要根据当前的运行时选择合适的脚本来执行。如果当前处于网页运行时，则优先使用JavaScript的脚本来执行，如果处于本地运行时，则优先使用Shell、Python之类的脚本执行。
 + 当任务涉及执行现有脚本完成工作时，优先阅读 `${AiHub Path}/script/script.md`，优先复用现有脚本，而不是重复实现同类能力
 + 应先根据 `${AiHub Path}/script/script.md` 中的脚本用途、最小参数摘要和示例，选择最合适的脚本执行任务
 + 若 `${AiHub Path}/script/script.md` 已能明确脚本用途与参数，则不要先读源码
