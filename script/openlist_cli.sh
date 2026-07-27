@@ -22,11 +22,11 @@ Purpose:
   Manage OpenList v4 offline-download tasks and files through its HTTP API.
 
 Commands:
-  tools       list configured offline-download tools
-  add         add one or more offline-download URLs
-  list        list download and/or transfer tasks
-  delete      delete task IDs, optionally canceling each one first
-  clear       clear completed or only succeeded tasks
+  offline-tools   list configured offline-download tools
+  offline-add     add one or more offline-download URLs
+  offline-list    list download and/or transfer tasks
+  offline-delete  delete task IDs, optionally canceling each one first
+  offline-clear   clear completed or only succeeded tasks
   mkdir       create a cloud directory
   ls          list a cloud directory
   info        get cloud file or directory information
@@ -39,17 +39,17 @@ Commands:
   download    download one cloud file safely
 
 Required and optional command inputs:
-  tools
-  add --dir PATH --url URL [--url URL ...]
+  offline-tools
+  offline-add --dir PATH --url URL [--url URL ...]
       [--tool NAME, default aria2]
       [--delete-policy VALUE, default delete_never]
       Policies: delete_on_upload_succeed, delete_on_upload_failed,
       delete_never, delete_always, upload_download_stream
-  list [--phase download|transfer|all, default all]
+  offline-list [--phase download|transfer|all, default all]
       [--status undone|done|all, default all]
-  delete --id ID [--id ID ...]
+  offline-delete --id ID [--id ID ...]
       [--phase download|transfer, default download] [--cancel]
-  clear [--phase download|transfer|all, default all] [--succeeded-only]
+  offline-clear [--phase download|transfer|all, default all] [--succeeded-only]
   mkdir --dir PATH
   ls --dir PATH [--page N, default 1] [--limit N, default 100] [--refresh]
   info --path PATH
@@ -78,7 +78,7 @@ Common inputs:
 
 Authentication and defaults:
   - The base URL is required for every command and trailing slashes are removed.
-  - The token is required except for public command tools.
+  - The token is required except for public command offline-tools.
   - Authorization is sent exactly as "Authorization: TOKEN", never as Bearer.
   - Cloud paths must be absolute. Repeated slashes and dot segments are normalized.
   - search without --all fetches one page; --all fetches remaining pages and
@@ -101,7 +101,7 @@ Output:
 Side effects and permissions:
   Mutating commands create, alter, transfer, or remove files/tasks. The supplied token
   must have the relevant OpenList mutation, task, and offline-download permissions.
-  delete does not cancel an active task unless --cancel is explicitly supplied.
+  offline-delete does not cancel an active task unless --cancel is explicitly supplied.
   File copy/move and asynchronous upload may create OpenList background tasks.
 
 Non-interactive and platform support:
@@ -396,10 +396,10 @@ cmd_tools() {
   local response
   local simplified
   local human
-  [[ $# -eq 0 ]] || die "tools does not accept command-specific options"
+  [[ $# -eq 0 ]] || die "offline-tools does not accept command-specific options"
   prepare_config 0
   response="$(api_request GET '/api/public/offline_download_tools' '' 0)"
-  simplified="$(jq '{success:true,command:"tools",tools:(.data // [])}' <<<"$response")"
+  simplified="$(jq '{success:true,command:"offline-tools",tools:(.data // [])}' <<<"$response")"
   human="$(jq -r 'if ((.tools // []) | length) == 0 then "Offline-download tools: none" else "Offline-download tools:\n" + (.tools | map("- " + tostring) | join("\n")) end' <<<"$simplified")"
   emit_result "$simplified" "$human" "$response"
 }
@@ -420,16 +420,16 @@ cmd_add() {
       --url) require_value "$1" "$#"; urls+=("$2"); shift 2 ;;
       --tool) require_value "$1" "$#"; tool="$2"; shift 2 ;;
       --delete-policy) require_value "$1" "$#"; policy="$2"; shift 2 ;;
-      *) die "unknown add option: $1" ;;
+      *) die "unknown offline-add option: $1" ;;
     esac
   done
   prepare_config
-  [[ -n "$dir_path" ]] || die "add requires --dir"
-  [[ ${#urls[@]} -gt 0 ]] || die "add requires at least one --url"
-  [[ -n "$tool" ]] || die "add --tool cannot be empty"
+  [[ -n "$dir_path" ]] || die "offline-add requires --dir"
+  [[ ${#urls[@]} -gt 0 ]] || die "offline-add requires at least one --url"
+  [[ -n "$tool" ]] || die "offline-add --tool cannot be empty"
   for url in "${urls[@]}"; do
-    [[ -n "$url" ]] || die "add --url cannot be empty"
-    [[ "$url" != *$'\n'* && "$url" != *$'\r'* ]] || die "add --url cannot contain a line break"
+    [[ -n "$url" ]] || die "offline-add --url cannot be empty"
+    [[ "$url" != *$'\n'* && "$url" != *$'\r'* ]] || die "offline-add --url cannot contain a line break"
   done
   case "$policy" in
     delete_on_upload_succeed|delete_on_upload_failed|delete_never|delete_always|upload_download_stream) ;;
@@ -439,7 +439,7 @@ cmd_add() {
   body="$(jq -cn --argjson urls "$(json_array "${urls[@]}")" --arg path "$dir_path" --arg tool "$tool" --arg policy "$policy" '{urls:$urls,path:$path,tool:$tool,delete_policy:$policy}')"
   response="$(api_request POST '/api/fs/add_offline_download' "$body")"
   simplified="$(jq --arg path "$dir_path" --arg tool "$tool" --arg policy "$policy" --argjson urls "$(json_array "${urls[@]}")" '
-    {success:true,command:"add",path:$path,tool:$tool,delete_policy:$policy,urls:$urls,
+    {success:true,command:"offline-add",path:$path,tool:$tool,delete_policy:$policy,urls:$urls,
      tasks:((.data.tasks // []) | map({id:(.id // ""),name:(.name // ""),state:(.state // null),status:(.status // ""),progress:(.progress // 0)}))}' <<<"$response")"
   human="$(jq -r '"Added " + ((.urls|length)|tostring) + " URL(s) with " + .tool + "; tasks returned: " + ((.tasks|length)|tostring)' <<<"$simplified")"
   emit_result "$simplified" "$human" "$response"
@@ -462,7 +462,7 @@ cmd_list() {
     case "$1" in
       --phase) require_value "$1" "$#"; phase="$2"; shift 2 ;;
       --status) require_value "$1" "$#"; status="$2"; shift 2 ;;
-      *) die "unknown list option: $1" ;;
+      *) die "unknown offline-list option: $1" ;;
     esac
   done
   prepare_config
@@ -482,7 +482,7 @@ cmd_list() {
         }))')"
     done
   done
-  simplified="$(jq -cn --arg phase "$phase" --arg status "$status" --argjson tasks "$tasks" '{success:true,command:"list",phase:$phase,status:$status,count:($tasks|length),tasks:$tasks}')"
+  simplified="$(jq -cn --arg phase "$phase" --arg status "$status" --argjson tasks "$tasks" '{success:true,command:"offline-list",phase:$phase,status:$status,count:($tasks|length),tasks:$tasks}')"
   human="$(jq -r 'if .count == 0 then "Offline tasks: none" else "Offline tasks (" + (.count|tostring) + "):\n" + (.tasks | map("- [" + .phase + "/" + .bucket + "] " + .id + "  " + .name + "  " + ((.progress // 0)|tostring) + "%  " + (.status // "")) | join("\n")) end' <<<"$simplified")"
   emit_result "$simplified" "$human" "${responses[@]}"
 }
@@ -504,14 +504,14 @@ cmd_delete() {
       --id) require_value "$1" "$#"; ids+=("$2"); shift 2 ;;
       --phase) require_value "$1" "$#"; phase="$2"; shift 2 ;;
       --cancel) cancel=1; shift ;;
-      *) die "unknown delete option: $1" ;;
+      *) die "unknown offline-delete option: $1" ;;
     esac
   done
   prepare_config
-  [[ ${#ids[@]} -gt 0 ]] || die "delete requires at least one --id"
+  [[ ${#ids[@]} -gt 0 ]] || die "offline-delete requires at least one --id"
   for id in "${ids[@]}"; do
-    [[ -n "$id" ]] || die "delete --id cannot be empty"
-    [[ "$id" != *$'\n'* && "$id" != *$'\r'* ]] || die "delete --id cannot contain a line break"
+    [[ -n "$id" ]] || die "offline-delete --id cannot be empty"
+    [[ "$id" != *$'\n'* && "$id" != *$'\r'* ]] || die "offline-delete --id cannot contain a line break"
   done
   kind="$(task_kind "$phase")"
   ids_json="$(json_array "${ids[@]}")"
@@ -527,7 +527,7 @@ cmd_delete() {
   if jq -e '(.data | type) == "object" and (.data | length) > 0' >/dev/null <<<"$response"; then
     die "task deletion failed: $(jq -r '.data | to_entries | map(.key + ": " + (.value | tostring)) | join("; ")' <<<"$response")"
   fi
-  simplified="$(jq -cn --arg phase "$phase" --argjson ids "$ids_json" --argjson canceled "$([[ "$cancel" == "1" ]] && printf true || printf false)" '{success:true,command:"delete",phase:$phase,ids:$ids,canceled_first:$canceled,deleted_count:($ids|length)}')"
+  simplified="$(jq -cn --arg phase "$phase" --argjson ids "$ids_json" --argjson canceled "$([[ "$cancel" == "1" ]] && printf true || printf false)" '{success:true,command:"offline-delete",phase:$phase,ids:$ids,canceled_first:$canceled,deleted_count:($ids|length)}')"
   human="Deleted ${#ids[@]} $phase task(s)$([[ "$cancel" == "1" ]] && printf ' after requesting cancellation' || true)"
   emit_result "$simplified" "$human" "${responses[@]}"
 }
@@ -547,7 +547,7 @@ cmd_clear() {
     case "$1" in
       --phase) require_value "$1" "$#"; phase="$2"; shift 2 ;;
       --succeeded-only) succeeded_only=1; shift ;;
-      *) die "unknown clear option: $1" ;;
+      *) die "unknown offline-clear option: $1" ;;
     esac
   done
   prepare_config
@@ -559,7 +559,7 @@ cmd_clear() {
     response="$(api_request POST "/api/task/$kind/$action" '{}')"
     responses+=("$response")
   done
-  simplified="$(jq -cn --arg phase "$phase" --argjson succeeded_only "$([[ "$succeeded_only" == "1" ]] && printf true || printf false)" --argjson request_count "${#responses[@]}" '{success:true,command:"clear",phase:$phase,succeeded_only:$succeeded_only,request_count:$request_count}')"
+  simplified="$(jq -cn --arg phase "$phase" --argjson succeeded_only "$([[ "$succeeded_only" == "1" ]] && printf true || printf false)" --argjson request_count "${#responses[@]}" '{success:true,command:"offline-clear",phase:$phase,succeeded_only:$succeeded_only,request_count:$request_count}')"
   human="Cleared $phase task history (${#responses[@]} request(s))"
   emit_result "$simplified" "$human" "${responses[@]}"
 }
@@ -953,11 +953,11 @@ main() {
   require_deps
   set -- "${COMMAND_ARGS[@]}"
   case "$command" in
-    tools) cmd_tools "$@" ;;
-    add) cmd_add "$@" ;;
-    list) cmd_list "$@" ;;
-    delete) cmd_delete "$@" ;;
-    clear) cmd_clear "$@" ;;
+    offline-tools) cmd_tools "$@" ;;
+    offline-add) cmd_add "$@" ;;
+    offline-list) cmd_list "$@" ;;
+    offline-delete) cmd_delete "$@" ;;
+    offline-clear) cmd_clear "$@" ;;
     mkdir) cmd_mkdir "$@" ;;
     ls) cmd_ls "$@" ;;
     info) cmd_info "$@" ;;
