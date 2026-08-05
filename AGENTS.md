@@ -35,7 +35,7 @@
 + 在执行完成安装过后，需要删除下载的压缩包
 
 ## 特殊任务处理
-
++ 验证码相关任务：如果在使用Playwright的情况下，并且2captcha的apikey存在的情况下，遇到验证码或者Cloudflare challenge之类的，可以调用`${AiHub Path}/script/playwright_2captcha.sh`脚本来处理。
 + 图片相关任务：如果用户命令中包含图片相关的指令，则强制通过调用 `${AiHub Path}/script/request_thirdparty_ai_platform.sh`，请求三方AI平台模型来完成对应的任务，避免因为读入图片污染上下文（除非脚本不可用或者没有配置对应的环境），可以优先通过models子命令来确定三方AI平台是否支持能完成对应任务的模型。
   + 图片生成：
     + 模型：gpt-image-2
