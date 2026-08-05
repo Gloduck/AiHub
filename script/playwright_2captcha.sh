@@ -19,6 +19,7 @@ rows=""
 cols=""
 angle=40
 piece_selectors=()
+PLAYWRIGHT_CMD=()
 
 usage() {
   cat <<'EOF'
@@ -76,7 +77,8 @@ Interactive mode:
   Not supported.
 
 Dependencies:
-  bash, curl, python3 and playwright-cli. The named playwright-cli session must
+  bash, curl and jq, plus either the playwright-cli command or a playwright
+  command that supports the cli subcommand. The named browser session must
   already be open.
 
 Side effects:
@@ -91,6 +93,18 @@ die() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
+}
+
+init_playwright_command() {
+  if command -v playwright-cli >/dev/null 2>&1; then
+    PLAYWRIGHT_CMD=(playwright-cli)
+    return
+  fi
+  if command -v playwright >/dev/null 2>&1 && playwright cli --help >/dev/null 2>&1; then
+    PLAYWRIGHT_CMD=(playwright cli)
+    return
+  fi
+  die "missing Playwright CLI; expected playwright-cli or playwright cli"
 }
 
 read_env_value() {
@@ -114,55 +128,32 @@ read_env_value() {
 
 json_field() {
   local field="$1"
-  python3 -c '
-import json
-import sys
-
-try:
-    value = json.load(sys.stdin).get(sys.argv[1], "")
-except (json.JSONDecodeError, AttributeError) as exc:
-    print(f"invalid JSON response: {exc}", file=sys.stderr)
-    raise SystemExit(2)
-
-if isinstance(value, bool):
-    print("1" if value else "0")
-elif value is None:
-    print("")
-elif isinstance(value, (dict, list)):
-    print(json.dumps(value, separators=(",", ":")))
-else:
-    print(value)
-' "$field"
+  jq -cr --arg field "$field" '
+    if type != "object" then error("expected JSON object") else . end
+    | (.[$field] // "")
+    | if type == "boolean" then (if . then "1" else "0" end) else . end
+  '
 }
 
 decode_playwright_value() {
-  python3 -c '
-import json
-import sys
-
-raw = sys.stdin.read().strip()
-try:
-    value = json.loads(raw)
-except json.JSONDecodeError:
-    print(raw)
-else:
-    if value is None:
-        print("")
-    elif isinstance(value, (dict, list)):
-        print(json.dumps(value, separators=(",", ":")))
-    else:
-        print(value)
-'
+  local raw
+  local decoded
+  raw="$(</dev/stdin)"
+  if decoded="$(printf '%s' "$raw" | jq -cr 'if . == null then "" else . end' 2>/dev/null)"; then
+    printf '%s\n' "$decoded"
+  else
+    printf '%s\n' "$raw"
+  fi
 }
 
 json_quote() {
-  python3 -c 'import json, sys; print(json.dumps(sys.stdin.read()))'
+  jq -Rsc .
 }
 
 playwright_value() {
   local expression="$1"
   local output
-  if ! output="$(playwright-cli -s="$session" --raw eval "$expression")"; then
+  if ! output="$("${PLAYWRIGHT_CMD[@]}" -s="$session" --raw eval "$expression")"; then
     die "unable to evaluate the playwright-cli session: $session"
   fi
   printf '%s' "$output" | decode_playwright_value
@@ -171,7 +162,7 @@ playwright_value() {
 playwright_run_value() {
   local code="$1"
   local output
-  if ! output="$(playwright-cli -s="$session" --raw run-code "$code")"; then
+  if ! output="$("${PLAYWRIGHT_CMD[@]}" -s="$session" --raw run-code "$code")"; then
     die "unable to run code in playwright-cli session: $session"
   fi
   printf '%s' "$output" | decode_playwright_value
@@ -456,7 +447,7 @@ apply_solution() {
   local apply_result
 
   token_json="$(printf '%s' "$solved_token" | json_quote)"
-  fields_json="$(printf '%s' "$field_names" | python3 -c 'import json, sys; print(json.dumps(sys.stdin.read().split(",")))')"
+  fields_json="$(printf '%s' "$field_names" | jq -Rsc 'split(",")')"
   selector_json="$(printf '%s' "$widget_selector" | json_quote)"
   fallback_json="$(printf '%s' "$fallback_callback" | json_quote)"
   apply_code="async page => {
@@ -499,7 +490,7 @@ apply_solution() {
     return result;
   }"
 
-  apply_result="$(playwright-cli -s="$session" --raw run-code "$apply_code")" || die "failed to apply the captcha token to session: $session"
+  apply_result="$("${PLAYWRIGHT_CMD[@]}" -s="$session" --raw run-code "$apply_code")" || die "failed to apply the captcha token to session: $session"
   printf 'apply_result: %s\n' "$apply_result"
 }
 
@@ -611,7 +602,7 @@ solve_drag_drop() {
   done
   pieces_json+="]"
   submit_and_poll "method=drag_drop" "body=$body" "images=$pieces_json" "textinstructions=${instruction:-Drag the images to proper position}"
-  selectors_json="$(printf '%s\n' "${piece_selectors[@]}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().splitlines()))')"
+  selectors_json="$(printf '%s\n' "${piece_selectors[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
   answer_json="$(printf '%s' "$solved_token" | json_quote)"
   background_json="$(printf '%s' "$image_selector" | json_quote)"
   result="$(playwright_run_value "async page => {
@@ -1149,8 +1140,8 @@ main() {
   parse_args "$@"
   [[ -n "$type_name" ]] || die "--type is required"
   require_cmd curl
-  require_cmd python3
-  require_cmd playwright-cli
+  require_cmd jq
+  init_playwright_command
   load_api_key
 
   if [[ "$type_name" == "auto" ]]; then
